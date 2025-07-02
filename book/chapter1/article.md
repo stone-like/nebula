@@ -199,7 +199,64 @@ resp, err := client.CreateChatCompletion(
     },
 )
 ```
-ユーザーの入力をOpenAI APIに送信し、GPTからの応答を取得します。ここでは最新の`GPT-4.1-nano`モデルを使用しています。
+
+### Chat Completions APIの詳細仕様
+
+OpenAIのChat Completions APIは、現代的な会話型AIの基盤となるAPIです。主要なパラメータを理解しておきましょう：
+
+**主要パラメータ：**
+
+- **`Model`**: 使用するAIモデル（例：`gpt-4.1-nano`, `gpt-4o`, `gpt-3.5-turbo`）
+- **`Messages`**: 会話履歴の配列。各メッセージには`Role`と`Content`が含まれる
+- **`Temperature`**: 応答のランダム性（0.0-2.0、デフォルト1.0）
+- **`MaxTokens`**: 生成する最大トークン数
+- **`Tools`**: Function Calling用のツール定義（Chapter 2で詳しく扱います）
+
+**メッセージロール：**
+
+```go
+// システムメッセージ（AIの振る舞いを指定）
+openai.ChatMessageRoleSystem
+
+// ユーザーメッセージ（人間からの入力）
+openai.ChatMessageRoleUser
+
+// アシスタントメッセージ（AIからの応答）
+openai.ChatMessageRoleAssistant
+
+// ツールメッセージ（Function Calling結果、Chapter 2で使用）
+openai.ChatMessageRoleTool
+```
+
+**レスポンス構造：**
+
+APIのレスポンスは以下のような構造になっています：
+
+```json
+{
+  "choices": [
+    {
+      "message": {
+        "role": "assistant",
+        "content": "こんにちは！何かお手伝いできることはありますか？"
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 10,
+    "completion_tokens": 15,
+    "total_tokens": 25
+  }
+}
+```
+
+:::message
+**参考リンク**
+- [OpenAI Chat Completions API 公式ドキュメント](https://platform.openai.com/docs/api-reference/chat)
+:::
+
+この実装では、ユーザーの入力を`ChatMessageRoleUser`として送信し、GPTからの応答を取得しています。モデルには高性能かつコスト効率の良い`GPT-4.1-nano`を使用しています。
 
 ## 動作確認
 

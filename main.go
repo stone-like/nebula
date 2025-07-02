@@ -22,11 +22,24 @@ func main() {
 	// OpenAIクライアントを初期化
 	client := openai.NewClient(apiKey)
 
-	fmt.Println("nebula - OpenAI Chat CLI")
+	// 利用可能なツールを取得
+	tools := GetAvailableTools()
+	
+	// ツールのスキーマを配列に変換
+	var toolSchemas []openai.Tool
+	for _, tool := range tools {
+		toolSchemas = append(toolSchemas, tool.Schema)
+	}
+
+	fmt.Println("nebula - OpenAI Chat CLI with Function Calling")
+	fmt.Println("Available tools: readFile")
 	fmt.Println("Type 'exit' or 'quit' to end the conversation")
 	fmt.Println("---")
 
 	scanner := bufio.NewScanner(os.Stdin)
+	
+	// 会話履歴を保持
+	var messages []openai.ChatCompletionMessage
 
 	for {
 		fmt.Print("You: ")
@@ -46,18 +59,19 @@ func main() {
 			continue
 		}
 
-		// OpenAI APIに送信
+		// ユーザーメッセージを履歴に追加
+		messages = append(messages, openai.ChatCompletionMessage{
+			Role:    openai.ChatMessageRoleUser,
+			Content: userInput,
+		})
+
+		// OpenAI APIに送信（ツールを含む）
 		resp, err := client.CreateChatCompletion(
 			context.Background(),
 			openai.ChatCompletionRequest{
-				//
-				Model: openai.GPT4Dot1Nano,
-				Messages: []openai.ChatCompletionMessage{
-					{
-						Role:    openai.ChatMessageRoleUser,
-						Content: userInput,
-					},
-				},
+				Model:    openai.GPT4Dot1Nano,
+				Messages: messages,
+				Tools:    toolSchemas,
 			},
 		)
 
@@ -66,10 +80,60 @@ func main() {
 			continue
 		}
 
-		if len(resp.Choices) > 0 {
-			fmt.Printf("Assistant: %s\n\n", resp.Choices[0].Message.Content)
-		} else {
+		if len(resp.Choices) == 0 {
 			fmt.Println("No response received from OpenAI")
+			continue
+		}
+
+		responseMessage := resp.Choices[0].Message
+		messages = append(messages, responseMessage)
+
+		// ツールコールがある場合の処理
+		if len(responseMessage.ToolCalls) > 0 {
+			fmt.Println("Assistant is using tools...")
+			
+			for _, toolCall := range responseMessage.ToolCalls {
+				if tool, exists := tools[toolCall.Function.Name]; exists {
+					// ツール関数を実行
+					result, err := tool.Function(toolCall.Function.Arguments)
+					if err != nil {
+						result = fmt.Sprintf(`{"error": "Tool execution failed: %v"}`, err)
+					}
+
+					// ツール実行結果をメッセージ履歴に追加
+					messages = append(messages, openai.ChatCompletionMessage{
+						Role:       openai.ChatMessageRoleTool,
+						Content:    result,
+						ToolCallID: toolCall.ID,
+					})
+
+					fmt.Printf("Tool '%s' executed with result: %s\n", toolCall.Function.Name, result)
+				}
+			}
+
+			// ツール実行後、再度APIを呼び出して最終回答を取得
+			resp, err = client.CreateChatCompletion(
+				context.Background(),
+				openai.ChatCompletionRequest{
+					Model:    openai.GPT4Dot1Nano,
+					Messages: messages,
+					Tools:    toolSchemas,
+				},
+			)
+
+			if err != nil {
+				fmt.Printf("Error calling OpenAI API after tool execution: %v\n", err)
+				continue
+			}
+
+			if len(resp.Choices) > 0 {
+				finalMessage := resp.Choices[0].Message
+				messages = append(messages, finalMessage)
+				fmt.Printf("Assistant: %s\n\n", finalMessage.Content)
+			}
+		} else {
+			// 通常の会話応答
+			fmt.Printf("Assistant: %s\n\n", responseMessage.Content)
 		}
 	}
 }
