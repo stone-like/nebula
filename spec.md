@@ -60,6 +60,9 @@ LLMがファイルシステムを操作するために、Go言語で実装しToo
 | `editFile` | `path: string`, `new_content: string` | `bool` | 指定した`path`（既存ファイル）の内容を`new_content`で完全に上書きする。 |
 | `searchInDirectory` | `directory: string`, `keyword: string` | `[]string` | 指定した`directory`配下を再帰的に検索し、`keyword`を含むファイルパスのリストを返す。 |
 
+
+writeFileとeditFileの際、実際にファイル作成/編集にユーザの許可をとること(diffは見せなくてよい。)
+
 ### 3.2. ツールスキーマ定義 (Go言語)
 LLMに渡すための各ツールのスキーマ定義です。
 

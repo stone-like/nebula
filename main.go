@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/sashabaranov/go-openai"
+	"nebula/tools"
 )
 
 func main() {
@@ -23,16 +24,16 @@ func main() {
 	client := openai.NewClient(apiKey)
 
 	// 利用可能なツールを取得
-	tools := GetAvailableTools()
+	toolsMap := tools.GetAvailableTools()
 	
 	// ツールのスキーマを配列に変換
 	var toolSchemas []openai.Tool
-	for _, tool := range tools {
+	for _, tool := range toolsMap {
 		toolSchemas = append(toolSchemas, tool.Schema)
 	}
 
 	fmt.Println("nebula - OpenAI Chat CLI with Function Calling")
-	fmt.Println("Available tools: readFile")
+	fmt.Println("Available tools: readFile, list, searchInDirectory, writeFile")
 	fmt.Println("Type 'exit' or 'quit' to end the conversation")
 	fmt.Println("---")
 
@@ -93,7 +94,7 @@ func main() {
 			fmt.Println("Assistant is using tools...")
 			
 			for _, toolCall := range responseMessage.ToolCalls {
-				if tool, exists := tools[toolCall.Function.Name]; exists {
+				if tool, exists := toolsMap[toolCall.Function.Name]; exists {
 					// ツール関数を実行
 					result, err := tool.Function(toolCall.Function.Arguments)
 					if err != nil {
