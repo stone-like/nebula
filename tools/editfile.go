@@ -76,6 +76,9 @@ func EditFile(args string) (string, error) {
 	}
 	defer file.Close()
 
+	// 制御文字をクリーンアップ
+	editArgs.NewContent = CleanControlCharacters(editArgs.NewContent)
+
 	// 新しい内容を書き込み
 	if _, err := file.WriteString(editArgs.NewContent); err != nil {
 		result := EditFileResult{

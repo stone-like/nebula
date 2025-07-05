@@ -88,6 +88,9 @@ func WriteFile(args string) (string, error) {
 	}
 	defer file.Close()
 
+	// 制御文字をクリーンアップ
+	writeArgs.Content = CleanControlCharacters(writeArgs.Content)
+
 	// 内容を書き込み
 	if _, err := file.WriteString(writeArgs.Content); err != nil {
 		result := WriteFileResult{

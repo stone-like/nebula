@@ -49,8 +49,10 @@ func ReadFile(args string) (string, error) {
 		return string(resultJSON), nil
 	}
 
+	contentStr := string(content)
+
 	result := ReadFileResult{
-		Content: string(content),
+		Content: contentStr,
 		Error:   "",
 	}
 	resultJSON, _ := json.Marshal(result)

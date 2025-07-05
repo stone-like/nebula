@@ -627,7 +627,6 @@ nebula/
 │   └── registry.go        # ツール登録管理
 ├── go.mod
 ├── go.sum
-└── nebula                 # 実行可能ファイル
 ```
 
 この時点で、nebulaエージェントは以下の能力を持っています：
