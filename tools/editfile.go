@@ -104,7 +104,7 @@ func GetEditFileTool() ToolDefinition {
 			Type: openai.ToolTypeFunction,
 			Function: &openai.FunctionDefinition{
 				Name:        "editFile",
-				Description: "既存ファイルの内容を完全に上書きします。重要: ファイルを破壊しないために、必ず以下のワークフローに従ってください: 1. 'readFile'を使用して現在の完全な内容を取得する。2. 思考プロセスで、読み取った内容を基に新しいファイルの完全版を構築する。3. このツールを使用して完全な新しい内容を書き込む。部分的な編集には使用しないでください。常にファイル全体の内容を提供してください。実行前にユーザーの許可を求めます。",
+				Description: "既存ファイルの内容を完全に上書きします。安全な編集のため、必ずreadFileで現在の内容を確認してから使用してください。実行前にユーザーの許可を求めます。",
 				Parameters: jsonschema.Definition{
 					Type: jsonschema.Object,
 					Properties: map[string]jsonschema.Definition{

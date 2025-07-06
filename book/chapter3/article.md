@@ -11,16 +11,43 @@ listツール、searchツール、writeツールという3つの重要なツー�
 
 これらのツールが揃うことで、LLMがプロジェクトの構造を理解し、必要なファイルを見つけ、新しいコードを書き出す能力を得ます。
 
+## 📁 この章での到達目標構造
+
+```
+nebula/
+├── main.go                 # 複数ツール対応
+├── tools.go               # 4つのツール実装 (~400行)
+├── go.mod                 
+└── go.sum                 
+```
+
+**前章からの変化:**
+- Chapter 2: readFileツールのみ
+- Chapter 3: **3つの新ツール追加** ← 今ここ
+
+**実装する機能:**
+- `list`ツール: ディレクトリ探索
+- `searchInDirectory`ツール: キーワード検索  
+- `writeFile`ツール: 新規ファイル作成（ユーザー確認付き）
+
+
+**tools.go拡張内容:**
+- ListArgs/ListResult構造体
+- SearchInDirectoryArgs/SearchInDirectoryResult構造体
+- WriteFileArgs/WriteFileResult構造体
+- GetAvailableTools()関数拡張
+
+
 それではさっそくツール類を作成していきましょう！
 
-## ハンズオン・チュートリアル
+## ファイルシステムツール実装
 
 ### 1. `list`ツールの実装（ファイル一覧の取得）
 
 まずは、エージェントが周囲の状況を把握するための`list`ツールを実装しましょう。
 このツールは、指定されたディレクトリ内のファイルとフォルダの一覧を取得します。
 
-現在の`tools.go`に新しいツールを追加していきます：
+現在の`tools.go`に新しいツールを追加していきます。
 
 ```go
 // ListArgs はlistツールの引数を表す構造体
@@ -36,7 +63,7 @@ type ListResult struct {
 }
 ```
 
-次に、実際のリスト処理を行う関数を実装します。この関数は2つのモード（再帰的・非再帰的）を持ち、それぞれ異なるアプローチでファイル一覧を取得します：
+次に、実際のリスト処理を行う関数を実装します。この関数は2つのモード（再帰的・非再帰的）を持ち、それぞれ異なるアプローチでファイル一覧を取得します。
 
 ```go
 // List は指定されたパス内のファイルとディレクトリをリストする
@@ -101,7 +128,7 @@ func List(args string) (string, error) {
 **実装のポイント解説:**
 
 - **`filepath.Walk`**: 再帰的探索の標準的な方法。コールバック関数を使って各ファイル・ディレクトリを処理
-- **`os.ReadDir`**: 軽量な非再帰探索。大きなプロジェクトでは高速
+- **`os.ReadDir`**: 軽量な非再帰探索。
 - **エラーハンドリング**: 探索エラーでもプログラムがクラッシュしないよう、JSON形式でエラー情報を返却
 - **パス結合**: `filepath.Join`でOS依存のパス区切り文字を適切に処理
 
@@ -141,7 +168,7 @@ func GetListTool() ToolDefinition {
 
 次に検索機能を実装しましょう。このツールは、プロジェクト全体から特定のキーワードを含むファイルを見つけ出します。
 
-必要なimportを`tools.go`の先頭に追加します：
+必要なimportを`tools.go`の先頭に追加します。
 
 ```go
 import (
@@ -158,7 +185,7 @@ import (
 )
 ```
 
-検索ツール用の構造体を定義します：
+検索ツール用の構造体を定義します。
 
 ```go
 // SearchInDirectoryArgs はsearchInDirectoryツールの引数を表す構造体
@@ -174,7 +201,7 @@ type SearchInDirectoryResult struct {
 }
 ```
 
-検索機能の実装です。この関数はプロジェクト全体を走査して、指定されたキーワードを含むファイルを効率的に見つけ出します：
+検索機能の実装です。この関数はプロジェクト全体を走査して、指定されたキーワードを含むファイルを効率的に見つけ出します。
 
 ```go
 // SearchInDirectory は指定されたディレクトリ配下を再帰的に検索し、キーワードを含むファイルを見つける
@@ -244,13 +271,12 @@ func SearchInDirectory(args string) (string, error) {
 
 **実装のポイント解説:**
 
-- **`bufio.Scanner`**: 大きなファイルでもメモリ効率良く1行ずつ処理。全体をメモリに読み込まない
-- **`strings.Contains`**: シンプルな文字列検索。正規表現より高速で初心者にも理解しやすい
+- **`bufio.Scanner`**: 大きなファイルでもメモリ効率良く1行ずつ処理。
+- **`strings.Contains`**: シンプルな文字列検索。
 - **エラーハンドリング**: バイナリファイルや権限エラーでも検索を継続。堅牢性を重視
 - **早期終了**: ファイル内で1回でもマッチしたら`break`で次のファイルへ。無駄な処理を避ける
-- **静かなスキップ**: 権限なしファイルなどは静かにスキップして検索全体を止めない
 
-スキーマ定義も追加：
+スキーマ定義も追加。
 
 ```go
 // GetSearchInDirectoryTool はsearchInDirectoryツールの定義を返す
@@ -284,10 +310,15 @@ func GetSearchInDirectoryTool() ToolDefinition {
 
 ### 3. `writeFile`ツールの実装（新規ファイル作成・ユーザー許可付き）
 
+:::message alert
+⚠️ **重要：破壊的操作について**
+`writeFile`ツールはファイルシステムに変更を加える破壊的操作です。実行前に必ずユーザーの明示的な許可を得る設計にしています。これにより、LLMによる予期しないファイル作成を防ぎ、安全な開発環境を維持できます。
+:::
+
 最後に`writeFile`ツールを実装します。
 このツールは新しいファイルを作成する強力な機能ですが、同時に危険性も持っています。そのため、実行前に必ずユーザーの許可を得るようにします。
 
-構造体の定義：
+構造体の定義。
 
 ```go
 // WriteFileArgs はwriteFileツールの引数を表す構造体
@@ -303,7 +334,7 @@ type WriteFileResult struct {
 }
 ```
 
-ユーザー許可機能付きの実装です。この関数はLLMによる自動ファイル作成の危険性を考慮し、必ずユーザーの明示的な承認を得てから実行される安全な設計になっています：
+ユーザー許可機能付きの実装です。この関数はLLMによる自動ファイル作成の危険性を考慮し、必ずユーザーの明示的な承認を得てから実行される安全な設計になっています。
 
 ```go
 // WriteFile は指定されたパスに新しいファイルを作成する（ユーザー許可が必要）
@@ -398,13 +429,13 @@ func WriteFile(args string) (string, error) {
 
 **実装のポイント解説:**
 
-- **既存ファイル保護**: `os.Stat`で事前チェック。意図しない上書きを防ぐ重要な安全機能
-- **ユーザー確認**: 自動化されたLLMによるファイル作成でも人間の判断を最終的に入れる設計
+- **既存ファイル保護**: `os.Stat`で事前チェック。意図しない上書きを防ぐ。
+- **ユーザー確認**: 破壊的変更なのでユーザーの承認を得る形に。
 - **ディレクトリ自動作成**: `os.MkdirAll`で深い階層のディレクトリも一度に作成可能
 - **リソース管理**: `defer file.Close()`でファイルハンドルの確実な解放
-- **エラー境界**: 各ステップでエラーをキャッチし、適切なJSON形式で返却。プログラム全体がクラッシュしない
+- **エラー境界**: 各ステップでエラーをキャッチし、適切なJSON形式で返却。
 
-スキーマ定義：
+スキーマ定義。
 
 ```go
 // GetWriteFileTool はwriteFileツールの定義を返す
@@ -438,7 +469,7 @@ func GetWriteFileTool() ToolDefinition {
 
 ### 4. 複数ツール管理システムの構築
 
-新しいツールを追加したので、`GetAvailableTools`関数を更新して、すべてのツールを管理できるようにします：
+新しいツールを追加したので、`GetAvailableTools`関数を更新して、すべてのツールを管理できるようにします。
 
 ```go
 // GetAvailableTools は利用可能な全てのツールを返す
@@ -452,7 +483,7 @@ func GetAvailableTools() map[string]ToolDefinition {
 }
 ```
 
-また、`main.go`の表示メッセージも更新しましょう：
+また、`main.go`の表示メッセージも更新しましょう。
 
 ```go
 fmt.Println("nebula - OpenAI Chat CLI with Function Calling")
@@ -461,73 +492,39 @@ fmt.Println("Type 'exit' or 'quit' to end the conversation")
 fmt.Println("---")
 ```
 
-### 5. コードの整理・リファクタリング
+### 5. 現在の状況確認
 
-ここまでで、`tools.go`ファイルがかなり大きくなってきました。将来の保守性を考えて、ツールごとに独立したファイルに分割しましょう。
+この章で追加した3つのツール（`list`、`searchInDirectory`、`writeFile`）により、`tools.go`ファイルが相当大きくなってしまいました。
+ですので次章の最初にリファクタリングをして、ツールごとに一ファイルとしましょう。
 
-まず、`tools`ディレクトリを作成します：
-
-```bash
-mkdir tools
+**現在のファイル構成:**
+```
+nebula/
+├── main.go                 # メインプログラム
+├── tools.go               # 全ツール実装（約400行）
+├── go.mod
+└── go.sum
 ```
 
-共通の型定義を`tools/common.go`に移動：
+## この章での学習ポイント
 
-```go
-package tools
+**達成できたこと:**
+1. **単一ファイル内でのツール管理**: `tools.go`内での複数ツール実装パターン習得
+2. **ツール設計原則**: 各ツールの構造体定義、実装、スキーマ定義の統一パターン
+3. **エラーハンドリング**: ファイルシステム操作での堅牢なエラー処理
+4. **ユーザー安全性**: `writeFile`でのユーザー確認機能
 
-import (
-	"github.com/sashabaranov/go-openai"
-)
-
-// ToolDefinition はLLMが呼び出せるツールを表す構造体
-type ToolDefinition struct {
-	Schema   openai.Tool
-	Function func(args string) (string, error)
-}
-```
-
-各ツールを独立したファイルに分割：
-
-- `tools/readfile.go`: readFileツール
-- `tools/list.go`: listツール  
-- `tools/search.go`: searchInDirectoryツール
-- `tools/writefile.go`: writeFileツール
-- `tools/registry.go`: ツール登録管理
-
-最後に、`main.go`のimportを更新：
-
-```go
-import (
-	"bufio"
-	"context"
-	"fmt"
-	"os"
-	"strings"
-
-	"github.com/sashabaranov/go-openai"
-	"nebula/tools"
-)
-```
-
-そして、ツール取得部分を更新：
-
-```go
-// 利用可能なツールを取得
-toolsMap := tools.GetAvailableTools()
-
-// ツールのスキーマを配列に変換
-var toolSchemas []openai.Tool
-for _, tool := range toolsMap {
-	toolSchemas = append(toolSchemas, tool.Schema)
-}
-```
+**次章での移行予定:**
+Chapter 4では、以下の理由でモジュラー構造に移行します。
+- `editFile`ツール追加により、単一ファイルが管理困難になる
+- 各ツールの独立性向上（テスト・保守性）
+- より実践的なGoプロジェクト構造の学習
 
 ## 動作確認
 
 これでこの章の機能が動くようになりました！実際に試してみましょう。
 
-まず、プログラムをビルドします：
+まず、プログラムをビルドします。
 
 **Linux/macOS の場合:**
 ```bash
@@ -540,7 +537,7 @@ go build -o nebula.exe .
 ```
 
 
-実行：
+そして実行します。
 
 **Linux/macOS の場合:**
 ```bash
@@ -554,7 +551,7 @@ nebula.exe
 
 ### テストケース
 
-以下のコマンドを試して、各ツールが正常に動作することを確認してください：
+以下のコマンドを試して、各ツールが正常に動作することを確認してください。
 
 #### 1. listツールのテスト
 
@@ -590,7 +587,7 @@ toolsディレクトリを再帰的にリストしてください
 "hello.txt" というファイルを作成して、内容は "Hello, World!" にしてください
 ```
 
-期待される動作：
+期待される動作。
 1. ユーザー確認プロンプトが表示される
 2. 'y'を入力すると、ファイルが作成される
 3. 他の文字を入力すると、キャンセルされる
@@ -613,23 +610,8 @@ toolsディレクトリを再帰的にリストしてください
 ✅ **ユーザー許可システム** - 危険な操作前の安全確認  
 ✅ **コード整理** - ツールごとの分割によるスケーラブルなアーキテクチャ
 
-### 完成したファイル構成
 
-```
-nebula/
-├── main.go                 # メインプログラム
-├── tools/
-│   ├── common.go          # 共通型定義
-│   ├── readfile.go        # ファイル読み込みツール
-│   ├── list.go            # ディレクトリリストツール
-│   ├── search.go          # キーワード検索ツール
-│   ├── writefile.go       # ファイル作成ツール
-│   └── registry.go        # ツール登録管理
-├── go.mod
-├── go.sum
-```
-
-この時点で、nebulaエージェントは以下の能力を持っています：
+この時点で、nebulaエージェントは以下の能力を持っています。
 
 -  `readFile`でファイル内容を読み取り
 -  `list`でプロジェクト構造を把握

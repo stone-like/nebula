@@ -7,48 +7,339 @@
 この章を終える頃には、nebulaは複数ファイル編集能力を獲得し、複雑なタスクもこなせるようなエージェントとなります。
 まずは現状はなぜ複雑なタスクができないか、から確認していきましょう。
 
+:::note この章で学ぶこと
+**システムプロンプトエンジニアリングの完全ガイド**
 
-## 現在のnebulaの問題点
+🎯 **解決する問題**
+- なぜLLMは複雑なタスクで失敗するのか？
+- どうすれば推測を防いで確実な情報収集をさせられるか？
+- 自動実行を止めずに完了まで実行させる方法は？
 
-Chapter 4までは下記のようなプロンプトを実行すると、うまく実装できなかったはずです。
+🛠️ **実装する機能**
+- 強制的な実行プロトコル（情報収集→実装）
+- GPT-4.1-nano/mini モデル選択機能
+- 設定ファイル管理システム
+
+📚 **学習内容**
+- 失敗するプロンプトパターンとその理由
+- 効果的なプロンプト設計の5つの原則
+- 実際のシステムプロンプトの構成要素別解説
+- モデル差への対応とコスト管理
+
+**クイックナビ**: [課題](#システムプロンプトで解決したい課題-16) → [失敗例](#失敗するプロンプトパターンとその理由-26) → [原則](#効果的なプロンプト設計の原則-36) → [解説](#実際のプロンプトの構成要素別解説-46) → [実装](#モデル選択機能の実装と使い方-56) → [テスト](#システムプロンプト実装-66)
+:::
+
+
+## 📁 この章での到達目標構造
+
+```
+nebula/
+├── main.go                 # システムプロンプト統合
+├── config/                 # 新規パッケージ
+│   └── config.go          # 設定管理・モデル選択
+├── tools/                  
+│   ├── common.go          
+│   ├── readfile.go        
+│   ├── list.go            
+│   ├── search.go          
+│   ├── writefile.go       
+│   ├── editfile.go        
+│   └── registry.go        
+├── go.mod                 
+└── go.sum                 
+```
+
+**前章からの変化:**
+- Chapter 4: editFile
+- Chapter 5: **システムプロンプト + 設定管理** ← 今ここ
+
+**実装する機能:**
+- システムプロンプト
+- gpt-4.1-nano/mini モデル選択機能
+- 設定ファイル管理（~/.nebula/config.json）
+
+**新規追加:**
+- `config/config.go`: Config構造体、LoadConfig()、SaveConfig()
+- システムプロンプト関数群
+
+**ユーザーディレクトリ:**
+```
+~/.nebula/
+└── config.json            # ユーザー設定ファイル
+```
+
+## システムプロンプトで解決したい課題 [1/6]
+
+Chapter 4まで実装されたnebulaは、基本的なファイル操作はできるようになりました。しかし、複雑なタスクを実行しようとすると、以下のような問題に直面します。
+
+### 具体的な問題例
+
+次のような指示を実行してみると、問題が明確になります。
 
 ```
 tools/writeFile.goを参考に、tools/copyFile.goを作成してください。ファイルをコピーする機能を実装し、tools/registry.goに登録してください
 ```
 
-これは現在のシステム（システムプロンプトなし）では、以下のような問題が発生するためです。
+**現在のnebulaの実際の失敗動作：**
 
-**1. 推測に基づく実装**
-- 既存のコードを「知っているつもり」になりがち
-- 実際のファイル内容を読まずに実装を開始
-- 結果として矛盾したコードや動作しないコードを生成
+1. **参照ファイルを読まずに実装開始**
+   - `tools/writeFile.go`の内容を確認しない
+   - 「知っているつもり」で実装を始める
+   - 結果：既存のコードスタイルと異なる実装
+
+2. **推測による間違い**
+   - ファイル拡張子を推測（`.ts`と間違える）
+   - ディレクトリ構造を推測（`src/`があると思い込む）
+   - 関数名やパターンを推測
+
+3. **断片的な作業**
+   - `copyFile.go`を作成するが、`registry.go`への登録を忘れる
+   - または、registry.goの現在の構造を確認せずに追加
+
+4. **実行の途中停止**
+   - 「実装してもよろしいですか？」と途中で確認を求める
+   - ユーザーが「はい」と答えるまで作業を停止
 
 
-**2. 断片的な作業**
-- ファイル単体での編集に留まり、プロジェクト全体としての一貫性を欠く
-- 一つのファイルを編集した後、他のファイルとの連携を考慮しない
+これらの問題は、**システムプロンプトがない**ことが原因です。
 
-これらの問題は、エージェントに**「どのように考え、どのように行動すべきか」**という指針がないことが原因です。
-ですので、システムプロンプトを使い、行動指針を与えてあげましょう。
+Chapter 1-4の実装では、LLMに特別な行動指針を与えず、純粋にFunction Callingでツールを使ってもらっていました。
 
-## システムプロンプトの実装
+```go
+// Chapter 1-4: システムプロンプトなし
+messages := []openai.ChatCompletionMessage{
+    {
+        Role:    openai.ChatMessageRoleUser,  // ユーザーメッセージのみ
+        Content: userInput,
+    },
+}
+```
 
-### なぜシステムプロンプトが効果的なのか
+このため、nebulaは公にあるコーディングエージェントとは違い、複雑なタスクだと下記のようにどうしていいかわからない状態に陥ってしまうのです。
+- **どのように調査すべきか**がわからない
+- **何を禁止すべきか**がわからない
+- **どの順序で作業すべきか**がわからない
 
-システムプロンプトは、LLMに「思考のフレームワーク」を与える仕組みです。
 
-**システムプロンプトによる解決：**
+そこでシステムプロンプトを追加することで、nebulaに「思考のフレームワーク」を与え、以下を実現していきます。
+
 - **一貫した思考プロセス**: 毎回同じ手順でタスクに取り組む
-- **強制的な安全性**: 危険な操作を事前に防止
-- **品質の向上**: 情報収集を強制することで実装品質が向上
+- **推測の禁止**: 事実に基づく実装を強制
+- **自動実行**: 途中で停止しない連続的な作業
 
-### 設計した行動指針の詳細
+:::summary 重要ポイント
+**システムプロンプトで解決する3つの根本問題**
+1. **推測による実装** → 事実に基づく情報収集を強制
+2. **断片的な作業** → プロジェクト全体を意識した連携実装
+3. **実行の途中停止** → 自動実行による連続的な作業フロー
+:::
 
-さて、これから行動指針を与えるわけですが、下記のような指針を持たせたいと思います。
+---
 
-#### 1. 非交渉可能なルール（Critical Rules）
+nebulaが複雑なタスクで失敗する根本的な原因を理解したところで、次は**実際によくある失敗パターン**を見ていきましょう。筆者が試行錯誤する中で陥った失敗例から、効果的でないプロンプトの特徴を学びます。
 
-**狙い**: LLMの「推測したがる」性質を抑制し、必ず事実に基づく実装を強制する。
+## 失敗するプロンプトパターンとその理由 [2/6]
+
+システムプロンプトを設計していく中で、何も知らなかった筆者が陥ってしまった失敗パターンが何個かあります。
+実際の例を見ながら、なぜそれらが効果的でないかを理解しましょう。
+
+
+### ❌ パターン1: 弱い表現の使用
+
+**失敗例：**
+```text
+# 基本ルール
+1. ファイルを編集する前に、できればreadFileで内容を確認してください
+2. 可能であれば、プロジェクト構造を理解してください
+3. 必要に応じて、searchInDirectoryで検索してください
+```
+
+**なぜ失敗するか：**
+- 「できれば」「可能であれば」「必要に応じて」では強制力が弱い
+- 推測してしまって既存ファイルの内容考えずにwriteとかeditとかをしてしまう
+
+**実際の失敗動作：**
+```
+User: "認証機能を追加してください"
+→ LLM: 結果：間違った場所にファイルを作成、思った内容と違う内容での編集
+```
+
+### ❌ パターン2: 手順の不明確性
+
+**失敗例：**
+```text
+# 実行手順
+1. 情報収集を行う
+2. 実装を行う
+3. 結果を確認する
+```
+
+**なぜ失敗するか：**
+- 各ステップが抽象的すぎる
+- 「情報収集」の具体的な内容が不明
+- ステップ間の移行条件が曖昧
+- 情報取集-> 実装の段で自動実行の指示がない　->　なのでユーザーにこれでいいですか？と聞くだけで終わってしまう可能性が高い
+
+**実際の失敗動作：**
+```
+User: "APIルーターを追加してください"
+→ LLM: 情報収集を開始
+→ LLM: 「実装を開始してもよろしいですか？」← 途中で停止
+→ ユーザーは「はい」と答える必要がある
+
+もしくは、情報収集が不十分のまま実装開始されてしまう。
+```
+
+
+### ❌ パターン3: 日本語でプロンプトを書く
+ここまで理解のため日本語でプロンプトを書いてきましたが、
+システムプロンプトは長文ということもあるせいか日本語では一部分、だけど大事な部分が伝わってくれないということがありました。
+もしかしたら最上位のモデルだったりプロンプトをもっと工夫すれば大丈夫なのかもしれません。
+
+ただ、できるなら英語でプロンプトを書く方が良さそうです。
+
+### 失敗パターン vs 成功パターン 比較表
+
+| 要素 | ❌ 失敗パターン | ✅ 成功パターン | 結果 |
+|------|----------------|----------------|------|
+| **表現の強さ** | 「できれば」「可能であれば」 | 「NEVER」「MUST」「FORBIDDEN」 | LLMが推測せず確実に実行 |
+| **手順の明確さ** | 「情報収集を行う」（抽象的） | 「Use readFile ALL reference files」（具体的） | 必要な情報を確実に収集 |
+| **自動実行** | 「実装してもよろしいですか？」 | 「proceed automatically without asking」 | 途中停止なしで完了まで実行 |
+| **禁止事項** | 一般的な注意事項 | 具体例付きFORBIDDEN項目 | 典型的ミスを事前に防止 |
+| **言語** | 日本語での長文指示 | 英語での構造化指示 | 重要な部分も確実に伝達 |
+
+:::summary 重要ポイント
+**失敗するプロンプトの3つの特徴**
+1. **弱い表現**：「できれば」「可能であれば」→ LLMが推測に走る
+2. **手順が不明確**：抽象的な指示→ 自動実行されずに途中停止
+3. **日本語使用**：長文だと重要な部分が伝わらない→ 英語推奨
+:::
+
+---
+
+失敗パターンを分析したことで、「何がうまくいかないか」が明確になりました。次は、これらの失敗から学んだ教訓を**実際に使える原則**にまとめていきます。効果的なシステムプロンプトを設計するための具体的な方法論を見ていきましょう。
+
+## 効果的なプロンプト設計の原則 [3/6]
+
+失敗パターンを踏まえ、効果的なシステムプロンプトの設計原則を整理します。
+
+
+### ファイル編集/書き込みの前に調査をしっかりさせる
+調査をしっかりさせることにより、既存のコードを理解した上でのファイル編集/新規作成が可能になります。
+そのためにやった方がいいことについて記載していきます。
+
+#### 原則: 守らせたいものは強制的な表現を使う
+
+- 「NEVER」「MUST」「FORBIDDEN」
+- 「MANDATORY」「REQUIRED」「Non-Negotiable」
+
+#### 原則: 具体的な禁止事項を明示する
+
+```text
+❌ FORBIDDEN: Guessing file names (e.g., assuming "todo.ts" exists without checking)
+❌ FORBIDDEN: Guessing file extensions (e.g., assuming .js when it might be .ts)
+❌ FORBIDDEN: Guessing directory structure (e.g., assuming files are in "src/" without checking)
+```
+
+#### 原則: 段階的で明確な実行プロトコル
+
+```text
+## Step 1: Information Gathering (Required, but proceed automatically)
+- Use 'list' to understand project structure
+- Use 'readFile' to read ALL reference files
+- Use 'searchInDirectory' to find related files
+
+## Step 2: Implementation (Proceed automatically after Step 1)
+- Use 'writeFile' for new file creation
+- Use 'editFile' for existing file modification
+```
+
+#### 原則: 実例による説明
+下記のように実際の実行プロトコルがどのように進むかの例示を与えてあげています。
+これはchain-of-thought (CoT)プロンプトという手法で、LLMにどういう形で思考すればよいかを示してあげることで、
+複雑なタスクでより良く動くようにする手法です。
+```text
+## Example 1: File Extension Discovery
+Request: "Add a todo feature to the app"
+**Correct sequence:**
+1. list(".") ← Discover if files are .js, .ts, .py, .go, etc.
+2. Find actual todo-related files with search or list
+3. readFile the discovered files to understand patterns
+4. Implement using the correct extension and patterns
+```
+
+
+### 調査の段階でストップさせないために
+
+#### 原則: 自動実行の強制
+このように調査 -> 実装へはユーザーに聞かないで進んでくださいと書かないと、調査だけで終わってしまう事態が多発したため。
+```text
+**IMPORTANT: Proceed from Step 1 to Step 2 automatically without asking for permission or confirmation.**
+```
+
+
+:::summary 重要ポイント
+**効果的なプロンプト設計の5つの原則**
+1. **強制的表現**：NEVER、MUST、FORBIDDEN で推測を禁止
+2. **具体的禁止事項**：実例付きで何をしてはいけないかを明示
+3. **段階的実行プロトコル**：Step 1（情報収集）→ Step 2（実装）
+4. **自動実行の強制**：「proceed automatically without asking」を明記
+5. **実例による説明**：正しい手順と間違った手順の対比
+:::
+
+---
+
+下記にプロンプトテクニック集が学べるリンクを貼っておきますので、興味のある方は見てみるのも良さそうです。
+
+:::message
+**参考リンク**
+- [Prompt Engineering Guide](https://www.promptingguide.ai/jp)
+:::
+
+
+設計原則がまとまったところで、次は**実際のシステムプロンプトがどう構成されているか**を詳しく見ていきます。
+理論を実践に落とし込む具体的な方法と、各要素がなぜ効果的なのかを解説していきます。
+
+
+
+## 実際のプロンプトの構成要素別解説 [4/6]
+
+これらの原則を踏まえ、実際に使用しているシステムプロンプトの各部分を詳しく解説します。
+
+### 基本構成の概要
+
+システムプロンプトは以下の6つの要素で構成されています：
+
+1. **Role（役割定義）** - エージェントの身分と能力を明確化
+2. **Critical Rules（非交渉的ルール）** - 絶対に守るべき5つのルール
+3. **Why説明（理由の説明）** - 情報収集の重要性を理論的に説明
+4. **Execution Protocol（実行プロトコル）** - Step 1→Step 2の強制的な流れ
+5. **禁止事項リスト** - 具体例付きでFORBIDDENパターンを明示
+6. **実行例** - 正しい手順と間違った手順の対比
+
+### 詳細解説
+
+#### 1. Role（役割定義）
+
+```text
+# Role
+You are "nebula", an expert software developer and autonomous coding agent.
+```
+
+**効果的な理由：**
+- 明確な身分・役割の定義
+- 「expert」で高い能力を期待
+- 「autonomous」で自律的な行動を促進
+
+:::insight 重要な洞察
+**なぜ「expert」「autonomous」が重要なのか**
+
+単に「assistant」や「helper」と定義すると、LLMは受動的になりがちです。
+「expert software developer」と明示することで、積極的で高度な判断を促し、
+「autonomous」で自律的な行動（途中で止まらない）を期待できます。
+:::
+
+#### 2. Critical Rules（非交渉可能なルール）
 
 ```text
 # Critical Rules (Non-Negotiable)
@@ -59,13 +350,22 @@ tools/writeFile.goを参考に、tools/copyFile.goを作成してください。
 5. **Complete the entire task in one continuous flow** - No pausing for confirmation
 ```
 
-**重要な追加項目**:
-- **ファイル名・場所の推測禁止**: GPT-4.1-nanoが起こしやすい「todo.ts」のような推測を防ぐ
-- **自動実行の強制**: 情報収集後の「よろしいですか？」による停止を防ぐ
+**効果的な理由：**
+- 「**Non-Negotiable**」で交渉の余地がないことを強調
+- 「**NEVER**」「**MUST**」で強制的な表現
+- 各ルールに理由を付加（「- You must explore...」）
+- 推測を完全に禁止
+- 情報収集を強制
+- 自動実行を強制
 
-#### 2. 情報収集の重要性と自動実行プロトコル
+:::warning 注意点
+**弱い表現を使ってはいけない理由**
 
-**狙い**: 推測を防ぎ、現実の状況把握を強制し、実行の途切れを防ぐ。
+「please」「try to」「if possible」などの丁寧な表現は、LLMに「optional（任意）」という印象を与えます。
+強制的な表現（NEVER、MUST、FORBIDDEN）により、「必須」として認識させることが重要です。
+:::
+
+#### 3. Why Information Gathering is Critical（理由の説明）
 
 ```text
 # Why Information Gathering is Critical
@@ -73,6 +373,18 @@ tools/writeFile.goを参考に、tools/copyFile.goを作成してください。
 - **Extensions matter**: .js vs .ts vs .go vs .py affects implementation
 - **Directory layout matters**: Different projects have different organization
 - **Assumption costs**: Guessing wrong means complete rework
+```
+
+**効果的な理由：**
+- 情報収集の重要性を理論的に説明
+- 具体的な失敗例を示唆（「.js vs .ts」）
+
+
+#### 4. Execution Protocol（実行プロトコル）
+
+```text
+# Execution Protocol
+When you receive a request, follow this mandatory sequence and proceed automatically without asking for permission:
 
 ## Step 1: Information Gathering (Required, but proceed automatically)
 - **Discover project structure**: Use 'list' to understand what files exist and their organization when working with multiple files or unclear requirements
@@ -94,14 +406,23 @@ tools/writeFile.goを参考に、tools/copyFile.goを作成してください。
 **IMPORTANT: Proceed from Step 1 to Step 2 automatically without asking for permission or confirmation.**
 ```
 
-**新しい重要な概念：**
-- **なぜ情報収集が重要なのかを明示**: LLMの理解を深める
-- **"Phase"から"Step"に変更**: より流れのある実行を暗示
-- **自動実行の強調**: 各ステップ間で停止しない設計
+**効果的な理由：**
+- 「**mandatory sequence**」で強制的な順序を明示
+- 「**proceed automatically**」で自動実行を2回強調
+- 各ステップの具体的な行動を明示
+- 「**Internal Verification**」でチェックリスト形式
+- 「**Required: YES**」で必須条件を明確化
+- 最後に再度自動実行を強調
 
-#### 3. 具体的な禁止事項と失敗パターン
+:::tip 実装のコツ
+**自動実行を確実にする方法**
 
-**狙い**: LLMが犯しやすい典型的なミスを具体例で防止する。
+「proceed automatically」を複数回繰り返し、「without asking for permission」を明示的に書くことで、
+LLMが途中で「実装してもよろしいですか？」と聞いて止まる問題を防げます。
+また、Internal Verificationのチェックリストで自己確認させることも効果的です。
+:::
+
+#### 5. Common Mistakes to Avoid（失敗パターンの具体例）
 
 ```text
 # Common Mistakes to Avoid
@@ -113,22 +434,54 @@ tools/writeFile.goを参考に、tools/copyFile.goを作成してください。
 ❌ **FORBIDDEN**: Skipping the readFile step because the task seems simple
 ❌ **FORBIDDEN**: Asking "Should I proceed with implementation?" after information gathering
 ❌ **FORBIDDEN**: Pausing for confirmation between information gathering and implementation
-
-# Why Guessing Fails
-- **Wrong file extension**: Implementing .js when the project uses .ts
-- **Wrong directory**: Creating files in wrong locations breaks project structure
-- **Wrong patterns**: Assuming patterns that don't match the actual codebase
-- **Wasted effort**: Implementation based on wrong assumptions requires complete rework
 ```
 
-**追加された重要な禁止事項：**
-- **具体的な推測例**: GPT-4.1-nanoが起こしやすい具体的なミスを明示
-- **許可確認の禁止**: 自動実行を阻害する行動の防止
-- **失敗の理由説明**: なぜ推測が問題なのかをLLMに理解させる
+**効果的な理由：**
+- 「❌ **FORBIDDEN**」で視覚的に禁止を強調
+- 具体的な失敗例を括弧内で提示
+- LLMが陥りやすい典型的なミスを網羅
+- 自動実行の阻害行動も禁止項目に含める
 
-### 実装済みシステムプロンプトの詳細
+#### 6. Execution Examples（実行例）
 
-上記の設計思想を踏まえ、実際のシステムプロンプトは以下のようになっています。
+```text
+# Execution Examples
+
+## Example 1: File Extension Discovery
+Request: "Add a todo feature to the app"
+**Correct sequence:**
+1. list(".") ← Discover if files are .js, .ts, .py, .go, etc.
+2. Find actual todo-related files with search or list
+3. readFile the discovered files to understand patterns
+4. Implement using the correct extension and patterns
+
+**Incorrect sequence:**
+1. writeFile("todo.ts", ...) ← FORBIDDEN: Guessed .ts without checking
+```
+
+**効果的な理由：**
+- 正しい手順と間違った手順を対比
+- 具体的なコマンド例を提示
+- 「← FORBIDDEN」で禁止理由を明示
+- 複数の具体例で理解を深める
+
+この構成により、LLMは：
+- **何をすべきか**が明確にわかる
+- **何をしてはいけないか**が具体的にわかる
+- **なぜその行動が必要か**を理解できる
+- **どの順序で行動すべきか**が明確になる
+
+:::summary 重要ポイント
+**システムプロンプトの構成要素**
+1. **Role**：「expert」「autonomous」で能力と自律性を定義
+2. **Critical Rules**：NEVER/MUSTで非交渉的なルールを設定
+3. **Why説明**：情報収集の重要性を理論的に説明
+4. **Execution Protocol**：Step 1→Step 2の強制的な流れ
+5. **禁止事項リスト**：具体例付きでFORBIDDENパターンを明示
+6. **実行例**：正しい手順と間違った手順の対比
+:::
+
+### 最終的なプロンプトの全体像
 
 ```go
 // getSystemPrompt はnebulaエージェント用のシステムプロンプトを返す
@@ -226,59 +579,26 @@ Complete the entire task following this protocol in one continuous flow. No shor
 }
 ```
 
-このシステムプロンプトは、`handleConversation`関数で会話の開始時に自動的に設定されます：
+最終的に上記のようなプロンプトになりました。
+このプロンプトに至るまでにGemini CLIやAIにプロンプトを添削してもらったりいろいろ試行錯誤した結果こんな感じで下記の要素を盛り込んでいます。
 
-```go
-// handleConversation はLLMとの対話セッションを処理する
-func handleConversation(client *openai.Client, toolSchemas []openai.Tool, toolsMap map[string]tools.ToolDefinition, userInput string, messages []openai.ChatCompletionMessage) []openai.ChatCompletionMessage {
-	// システムプロンプトが設定されていない場合は最初に追加
-	if len(messages) == 0 {
-		messages = append(messages, openai.ChatCompletionMessage{
-			Role:    openai.ChatMessageRoleSystem,
-			Content: getSystemPrompt(),
-		})
-	}
-	// 以下省略...
-}
-```
+- **強制的な表現**（NEVER、MUST、FORBIDDEN）
+- **具体的な禁止事項**（実例付き）
+- **理由の明確化**（Why情報収集が重要か）
+- **段階的な実行プロトコル**（Step 1 → Step 2）
+- **自動実行の強制**（途中停止の禁止）
+- **実行例**（正しい手順と間違った手順の対比）
 
-プロンプトについてはGemini CLIが参考になるので興味のある方は見てみてください。
 :::message
 **参考リンク**
 - [Gemini CLI ソースコード](https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/core/prompts.ts)
 :::
 
-### プロンプト設計の改善過程と解決策、モデルによるプロンプト準拠の違い
+### モデルによるプロンプト準拠の違い
 
-当初のプロンプトは下記のような問題があり、試行錯誤の末現在のプロンプトに落ち着きました。
-ここでは失敗パターンとどうすれば改善できたのかを見てきましょう。
+ここまでシステムプロンプトを作成し、GPT-4.1-miniでならプロンプト準拠で動き、複雑なタスクもこなせるようになりました。
 
-**初期の失敗パターン:**
-1. **情報収集で停止**: 「よろしいですか？」で実装に進まない問題
-2. **推測による実装**: 「todo.ts」のようなファイル名を推測して実装しようとする
-3. **不完全な作業**: handler層を抜かすなど、一部の必要なファイルを見落とし
-
-**解決のアプローチ:**
-
-#### 1. 自動実行の強制
-```text
-4. **NEVER ask for permission between steps** - Proceed automatically through the entire workflow
-5. **Complete the entire task in one continuous flow** - No pausing for confirmation
-```
-
-#### 2. 推測禁止の具体化
-```text
-❌ **FORBIDDEN**: Guessing file names (e.g., assuming "todo.ts" exists without checking)
-❌ **FORBIDDEN**: Guessing file extensions (e.g., assuming .js when it might be .ts)
-❌ **FORBIDDEN**: Guessing directory structure (e.g., assuming files are in "src/" without checking)
-```
-
-#### 3. 多様な実例による学習
-3つの異なるシナリオ（ファイル拡張子発見、参照ファイル読み込み、ディレクトリ構造発見）で正しい手順と間違った手順を明示。
-
-#### モデルによる違い
-上記までやったところGPT-4.1-miniでならプロンプト準拠で動き、複雑なタスクもこなせるようになりました。
-現在までで使っているようなGPT-4.1-nanoについては、確かにシステムプロンプトがある方が成功の度合いはグンと高まります。
+現在使用しているGPT-4.1-nanoについては、確かにシステムプロンプトがある方が成功の度合いはグンと高まります。
 しかし、まだまだ自動で実装段階に行ってくれなかったり、作業を一つだけ抜かして進めてしまったりとプロンプト準拠しない場合もありました。
 
 GPT-4.1-nanoでうまく進めたいのならユーザープロンプトを本当にがちがちに書かないと上手くタスク完了をしてくれない可能性があります。
@@ -286,7 +606,7 @@ GPT-4.1-nanoでうまく進めたいのならユーザープロンプトを本�
 
 ただこのままではモデル切り替えもできませんし不便なので、モデル選択機能を作ってみましょう！
 
-#### モデル選択機能の実装と使い方
+#### モデル選択機能の実装と使い方 [5/6]
 
 
 ##### 1. 設定管理システムの実装
@@ -568,10 +888,33 @@ func handleModelSwitch(cfg *config.Config) {
 
 ##### 4. 実際の使用方法
 
-```bash
-# nebulaを起動
-./nebula
+まず、プロジェクトをビルドします。
 
+**Linux/macOS の場合:**
+```bash
+go build -o nebula .
+```
+
+**Windows の場合:**
+```bash
+go build -o nebula.exe .
+```
+
+そして実行します。
+
+**Linux/macOS の場合:**
+```bash
+./nebula
+```
+
+**Windows の場合:**
+```cmd
+nebula.exe
+```
+
+成功すると、次のような出力が表示されます。
+
+```
 nebula - OpenAI Chat CLI with Function Calling
 Current model: gpt-4.1-nano                    # ← 現在のモデル表示
 Available tools: readFile, list, searchInDirectory, writeFile, editFile
@@ -590,8 +933,6 @@ Select model (1 or 2): 2
 
 Model switched to: gpt-4.1-mini                # ← 設定保存完了
 
-# 以降は新しいモデルで動作
-You: tools/writeFile.goを参考に、tools/copyFile.goを作成してください
 ```
 
 ##### 5. 設定ファイルの永続化
@@ -625,28 +966,16 @@ You: tools/writeFile.goを参考に、tools/copyFile.goを作成してくださ�
 
 
 ## JSON処理の安全性強化
-さてモデル選択が終わったところで、さっそくシステムプロンプト実験...と行きたいのですが、もう一点だけ修正事項があります。
-この部分を修正しておかないと、システムプロンプトを存分に試すことができないのでここで修正しておきましょう。
-具体的には下記のようなJSON関係の問題です。
 
-**問題: editFile toolでの制御文字混入によるコンパイルエラー**
-```
-editやwriteでファイル内容に 0x06(ACK) のような制御文字が書き込まれることにより、コンパイルエラーが発生
-```
+実用的なシステムプロンプトが完成し、モデル選択機能も追加できたところで、実際の運用で発生する可能性がある技術的な問題に対処しておきましょう。
 
-### 問題の根本原因
+**問題: editFile/writeFileでの制御文字混入**
 
-**OpenAI Function CallingのJSON処理フロー：**
-1. **LLMが文字列生成** → OpenAI APIがJSON形式でツールに送信
-2. **JSON内で制御文字がエスケープ** → `\u0006`のような形式
-3. **Go側でjson.Unmarshal** → エスケープされた制御文字が実際の制御文字に変換
-4. **ファイルに書き込み** → `0x06`のような制御文字がファイルに混入
+OpenAI Function Callingでは、稀にLLMが生成した文字列にUnicodeの制御文字（`\u0006`など）が含まれることがあります。これらの制御文字がファイルに書き込まれると、Goコンパイラがエラーを出す原因となります。
 
-### 実装した解決策
+**解決策: シンプルな制御文字除去**
 
-#### 1. シンプルな制御文字除去機能
-
-新しく`tools/json_helpers.go`を作成し、必要最小限の安全性機能を実装します。
+`tools/json_helpers.go`を作成し、ファイル書き込み前の安全性チェックを追加します。
 
 ```go
 package tools
@@ -658,6 +987,7 @@ import (
 // CleanControlCharacters は文字列から制御文字を除去する
 func CleanControlCharacters(s string) string {
 	return strings.Map(func(r rune) rune {
+		// タブ、改行、復帰文字以外の制御文字を除去
 		if r < 32 && r != '\t' && r != '\n' && r != '\r' {
 			return -1 // 制御文字を除去
 		}
@@ -666,56 +996,29 @@ func CleanControlCharacters(s string) string {
 }
 ```
 
-#### 2. ファイル操作での制御文字除去
+このヘルパー関数を、`writeFile`と`editFile`のファイル書き込み前に適用することで、安全で問題のないファイルを作成できます。
 
-writeFileとeditFileで、ファイル書き込み前に制御文字を自動除去：
-
+**適用例:**
 ```go
-// writeFile での使用例
-writeArgs.Content = CleanControlCharacters(writeArgs.Content)
-
-// editFile での使用例  
-editArgs.NewContent = CleanControlCharacters(editArgs.NewContent)
+// writeFile/editFile での使用
+cleanContent := CleanControlCharacters(originalContent)
+// cleanContentでファイル書き込み実行
 ```
 
-**重要な設計判断:**
-- **readFile**: 制御文字除去なし（情報の完全性を保持）
-- **writeFile/editFile**: 制御文字除去あり（安全なファイル作成）
-- **JSON処理**: 標準ライブラリを信頼（Go標準の堅牢性活用）
+**設計原則:**
+- **最小限の介入**: 必要な制御文字（改行等）は保持
+- **透明性**: ユーザーには見えない安全性の確保
+- **信頼性**: Go標準ライブラリの活用
 
-### 修正の効果
+## システムプロンプト実装 [6/6]
 
-**修正前：**
-```json
-// OpenAI APIからのJSON
-{"path": "test.go", "content": "package main\u0006\nfunc main() {}"}
-```
-↓ json.Unmarshal
-```go
-// 制御文字が含まれるファイル内容 → コンパイルエラー
-writeArgs.Content = "package main[ACK]\nfunc main() {}"
-```
-
-**修正後：**
-```json
-// 同じJSON入力
-{"path": "test.go", "content": "package main\u0006\nfunc main() {}"}
-```
-↓ CleanControlCharacters で制御文字除去
-```go
-// クリーンなファイル内容 → コンパイル成功
-writeArgs.Content = "package main\nfunc main() {}"
-```
-
-## ハンズオン：todo-appでの実践テスト
-
-さて、ようやくシステムプロンプトを試すことができます。
-本章の一番最初で示した例でも良いのですが、もう少し大きい例で試してみましょう。
+上記で設計したシステムプロンプトを実際のコードに実装し、その効果を確認しましょう。
 
 ### セットアップ手順
 
 実際にnebulaの改善効果を体験するため、todo-appを使った実践テストを行います。
 
+**Linux/macOS の場合:**
 ```bash
 # 1. nebulaリポジトリをクローン
 git clone <nebula-repo>
@@ -733,9 +1036,27 @@ git add .
 git commit -m "Initial todo-app for nebula experiments"
 ```
 
+**Windows の場合:**
+```cmd
+# 1. nebulaリポジトリをクローン
+git clone <nebula-repo>
+cd nebula
+
+# 2. todo-appをコピー
+xcopy test\todo-app todo-app /E /I
+cd todo-app
+
+# 3. git初期化（元の.gitディレクトリはない状態）
+git init
+
+# 4. 初期コミット（実験のベースライン）
+git add .
+git commit -m "Initial todo-app for nebula experiments"
+```
+
 ### todo-appの構成
 
-todo-appは、Clean Architectureに基づいたTODO管理APIです：
+todo-appは、Clean Architectureに基づいたTODO管理APIです。
 
 ```
 todo-app/
@@ -766,8 +1087,7 @@ todo.go、todo_usecase.go、todo_handler.goにそれぞれpriority関連の処�
 
 
 注意点:
-たまに探索だけで実装まで行ってくれないときがあるのですが、その時は一回exitして最初からやり直してみてください。
-もし上手くいかないようならもうちょっとプロンプトを詳しく書き、下記のようにしてみてください。
+上記で上手く行くはずですが、もし上手くいかないようならもうちょっとプロンプトを詳しく書き、下記のようにしてみてください。
 
 ```
 Goで書かれている本プロジェクトのTODOアプリに優先度機能を追加してください。具体的には次のように機能追加をお願いします。Todoエンティティに priority フィールド を追加し、domain層のtodo.go、usecase層のtodo_usecase.go、handler層のtodo_handler.go すべてに適切な変更を行ってください。
@@ -779,11 +1099,10 @@ Goで書かれている本プロジェクトのTODOアプリに優先度機能�
 
 ### 実験後のリセット
 
-各実験後は、以下のコマンドで元の状態に戻せます：
+各実験後は、以下のコマンドで元の状態に戻せます。
 
 ```bash
-# 前回の実験をリセット
-git reset --hard HEAD~1
+git restore .
 git clean -fd
 ```
 
@@ -806,26 +1125,6 @@ git clean -fd
 - **シンプル設計の価値**: 複雑さを避けた最小限の安全性確保
 - **普遍的原則**: 特定モデル向けではない汎用的な改善アプローチ
 
-### 現在のファイル構成
-
-```
-nebula/
-├── main.go                    # 改良されたシステムプロンプト & モデル選択機能実装済み
-├── config/                    # ★ NEW: 設定管理パッケージ
-│   └── config.go              # モデル選択と設定ファイル管理
-├── tools/                    
-│   ├── common.go
-│   ├── registry.go
-│   ├── json_helpers.go        # ★ NEW: シンプルな制御文字除去機能
-│   ├── readfile.go           ）
-│   ├── list.go                
-│   ├── search.go            
-│   ├── writefile.go          
-│   └── editfile.go           
-└── go.mod
-...
-```
-
 ### 次章でやること
 
 Chapter5でnebulaは複雑なファイル編集機能を獲得しました。
@@ -835,4 +1134,4 @@ Chapter5でnebulaは複雑なファイル編集機能を獲得しました。
 
 次のChapter6ではもう少しだけ機能追加をしていきます。
 複数ファイル編集は本Chapterで達成できているのですが、Planモードと以前の会話からスタートする記憶保持機能を実装していきます。
-この2能を実装し、本プロジェクトを締めくくりましょう！
+この2機能を実装し、本プロジェクトを締めくくりましょう！

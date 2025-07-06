@@ -1,22 +1,50 @@
-# Chapter 2: "Function Calling" でLLMの能力を拡張する
+# Chapter 2: Function Calling（関数呼び出し）でLLMの能力を拡張する
 
 ## はじめに
 
 前章では、OpenAI APIと基本的な会話ができるCLIアプリケーションを作成しました。
 
-ここからは**Function Calling**（ツール機能）を使うことで、LLMに「道具」を与え、ファイルの読み込み、計算の実行、外部APIの呼び出しなど、様々な「行動」を取らせてみましょう。
+ここからは**Function Calling（関数呼び出し）**を使うことで、LLMに「道具」を与え、ファイルの読み込み、計算の実行、外部APIの呼び出しなど、様々な「行動」を取らせてみましょう。
 
 この章では、`readFile`ツールを実装し、GPTがファイルシステムを探索できるようにします。これが、自律的なコーディングエージェントの第一歩となります。
 
 `readFile`ツールを実装することにより、「このプロジェクトのREADME.mdを読んで、どんなプロジェクトか教えて」と言うだけで、LLMが自動的にファイルを読み込み、内容を分析して回答してくれるようになっていきます！
 
+## 📁 この章での到達目標構造
+
+```
+nebula/
+├── main.go                 # OpenAI Function Calling対応
+├── tools.go               # readFileツール実装 (~100行)
+├── go.mod                 
+└── go.sum                 
+```
+
+**前章からの変化:**
+- Chapter 1: 基本的な会話のみ
+- Chapter 2: **Function Calling統合** ← 今ここ
+
+**実装する機能:**
+- OpenAI Function Calling統合
+- `readFile`ツール実装
+- JSON引数処理
+- ツール実行ロジック
+
+**新規追加:**
+- `tools.go`: ToolDefinition構造体、readFile実装
+
+**依存関係追加:**
+- `github.com/sashabaranov/go-openai/jsonschema`
+
 それでは、LLMに最初の「道具」を与えていきましょう。
 
-## ハンズオン・チュートリアル
+## Function Calling実装
 
-### 1. Function Calling（Tool Calling）の概念を理解する
+### 1. Function Calling の概念を理解する
 
-Function Callingとは、LLMが「特定の関数を呼び出したい」と判断した際に、その関数名と引数をJSON形式で返してくれる仕組みです。アプリケーション側では、そのリクエストを受け取って実際に関数を実行し、結果をLLMに返すことで、LLMは外部の情報や機能を活用できるようになります。
+:::details Function Callingの基本概念
+
+Function Calling（関数呼び出し）とは、LLMが「特定の関数を呼び出したい」と判断した際に、その関数名と引数をJSON形式で返してくれる仕組みです。アプリケーション側では、そのリクエストを受け取って実際に関数を実行し、結果をLLMに返すことで、LLMは外部の情報や機能を活用できるようになります。
 
 **従来の会話の流れ:**
 ```
@@ -30,9 +58,16 @@ User → LLM → ツール実行要求 → アプリ側で関数実行 → 結�
 
 OpenAI APIでは、`Tools`パラメータにJSON Schemaで関数の仕様を定義して渡すことで、LLMがその関数を使えるようになります。
 
+**Function Callingの利点:**
+- **外部システム連携**: ファイルシステム、データベース、API呼び出しが可能
+- **リアルタイム情報**: 現在の時刻、天気、株価などの動的データにアクセス
+- **計算実行**: 複雑な数値計算や処理をプログラムで実行
+- **制御可能**: どの機能をいつ使用するかをLLMが適切に判断
+:::
+
 ### 2. OpenAI Function Calling の詳細仕様
 
-OpenAIのFunction Calling機能は、JSON Schemaに基づいてツールを定義します。基本的な構造は以下の通りです：
+OpenAIのFunction Calling機能は、JSON Schemaに基づいてツールを定義します。基本的な構造は以下の通りです。
 
 ```json
 {
@@ -61,7 +96,7 @@ OpenAIのFunction Calling機能は、JSON Schemaに基づいてツールを定�
 - **`parameters`**: JSON Schema仕様に準拠したパラメータ定義
 - **`required`**: 必須パラメータの配列
 
-LLMがツールを呼び出す際は、以下のような形式でレスポンスを返します：
+LLMがツールを呼び出す際は、以下のような形式でレスポンスを返します。
 
 ```json
 {
@@ -118,7 +153,7 @@ type ToolDefinition struct {
 }
 ```
 
-この構造体設計のポイントを説明します：
+この構造体設計のポイントを説明します。
 
 **`ReadFileArgs`**: LLMから渡される引数を受け取る構造体です。今回は「ファイルパス」のみですが、将来的に引数が増えても拡張しやすい設計になっています。
 
@@ -128,7 +163,7 @@ type ToolDefinition struct {
 
 ### 3. `readFile`の本体となる、指定されたファイルを読み込むGoの関数を実装する
 
-次に、実際にファイルを読み込む関数を実装します。続けて`tools.go`に追加してください：
+次に、実際にファイルを読み込む関数を実装します。続けて`tools.go`に追加してください。
 
 ```go
 // ReadFile は指定されたパスのファイル内容を読み込む
@@ -209,7 +244,7 @@ func GetAvailableTools() map[string]ToolDefinition {
 
 ### 4. LLMからのツールコール要求を処理し、関数の結果をLLMに返す基本的な対話ループを構築する
 
-最後に、`main.go`を拡張してFunction Calling対応の対話ループを実装します：
+最後に、`main.go`を拡張してFunction Calling対応の対話ループを実装します。
 
 ```go
 package main
@@ -379,7 +414,7 @@ nebulaのreadFileツールがこのファイルを正しく読み込めるかを
 - 行3: Function Calling is working!" > sample.txt
 ```
 
-プログラムをビルド:
+プログラムをビルドします。
 
 **Linux/macOS の場合:**
 ```bash
@@ -391,7 +426,7 @@ go build -o nebula .
 go build -o nebula.exe .
 ```
 
-実行：
+そして実行します。
 
 **Linux/macOS の場合:**
 ```bash
@@ -443,26 +478,41 @@ Assistant: 申し訳ありませんが、指定されたファイルを読み込
 
 このようにLLMがツールを自動的に使い分け、エラーハンドリングも適切に行っています。
 
-:::message alert
-**トラブルシューティング**
-- ツールが実行されない場合：使用しているモデルがFunction Calling対応であることを確認してください（GPT-4シリーズ推奨）
-- JSON解析エラーが出る場合：ツールスキーマの定義が正しいか確認してください
+:::details トラブルシューティング
+
+**問題1**: JSON解析エラーが発生
+- **原因**: ツールスキーマの定義が間違っている
+- **解決策**: 
+  1. `jsonschema.Definition`の構造を確認
+  2. `Required`フィールドが正しく設定されているか確認
+  3. パラメータ名が引数構造体と一致しているか確認
+
+**問題2**: ツール実行後にレスポンスが返らない
+- **原因**: ツール実行結果の形式が間違っている
+- **解決策**: 
+  1. ツール関数が必ずJSON文字列を返すことを確認
+  2. エラー時も適切なJSON形式で返却
+  3. `ToolCallID`が正しく設定されているか確認
+
+**デバッグのヒント:**
+もし上手くいかない場合は下記をやってみましょう。
+- `fmt.Printf`でツール呼び出し引数を出力
+- APIレスポンスの`ToolCalls`フィールドを確認
+- JSON形式の確認には`json.MarshalIndent`を使用
+:::
+
+:::message
+💡 **Function Calling学習のコツ**
+Function Callingの理解を深めるために、以下を試してすのもよさそうです。
+- **Descriptionの重要性**: ツールの説明文を変更して、LLMの行動がどう変わるかを観察
+- **引数の型**: 異なる型のパラメータ（number, boolean, array）を持つツールの実装
+- **エラー処理**: 意図的にエラーを発生させて、LLMがどう対応するかを確認
+- **デバッグ出力**: `fmt.Printf`でツール呼び出しの詳細を観察し、内部動作を理解
 :::
 
 ## この章のまとめと次のステップ
 
-この章では、LLMに初めての「道具」を与えることに成功しました。完成したコードの構造は以下の通りです：
-
-### 作成したファイル一覧
-
-```
-nebula/
-├── go.mod              # Goモジュール定義
-├── go.sum              # 依存関係のチェックサム
-├── main.go             # Function Calling対応のメインプログラム
-├── tools.go            # ツール定義とreadFile実装
-└── sample.txt          # テスト用ファイル
-```
+この章では、LLMに初めての「道具」を与えることに成功しました。
 
 ### 達成できたこと
 

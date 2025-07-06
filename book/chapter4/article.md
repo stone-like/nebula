@@ -17,11 +17,176 @@
 - Read-Modify-Writeパターンを自然に実行する
 
 
-## ハンズオン・チュートリアル
+## 一旦リファクタリング
+
+### Chapter 3終了時の状況
+
+Chapter 3では、4つのツール（`readFile`, `list`, `searchInDirectory`, `writeFile`）を`tools.go`単一ファイルで実装しました。
+これにより、nebulaエージェントは基本的なファイル操作能力を獲得しましたが、tools.goが肥大化してしまいました。
+ですので、editツールを作成する前にここで一旦リファクタリングをしてしまいましょう。
+
+**現在のファイル構造:**
+```
+nebula/
+├── main.go                 # メインプログラム
+├── tools.go               # 全ツール実装（約400行）
+├── go.mod
+└── go.sum
+```
+
+**Chapter 4目標構造:**
+```
+nebula/
+├── main.go                 # メインプログラム
+├── tools/                  # ツールパッケージ
+│   ├── common.go          # 共通型定義
+│   ├── readfile.go        # readFileツール
+│   ├── list.go            # listツール
+│   ├── search.go          # searchInDirectoryツール
+│   ├── writefile.go       # writeFileツール
+│   ├── editfile.go        # editFileツール（新規）
+│   └── registry.go        # ツール登録管理
+├── go.mod
+└── go.sum
+```
+
+### 1. toolsディレクトリの作成
+
+まず、新しいパッケージ用のディレクトリを作成します。
+
+```bash
+mkdir tools
+```
+
+### 2. 共通型定義の分離
+
+`tools/common.go`を作成し、共通の型定義を配置します。
+
+```go
+package tools
+
+import (
+	"github.com/sashabaranov/go-openai"
+)
+
+// ToolDefinition はLLMが呼び出せるツールを表す構造体
+type ToolDefinition struct {
+	Schema   openai.Tool
+	Function func(args string) (string, error)
+}
+```
+
+### 3. 既存ツールの分割
+
+Chapter 3で実装した各ツールを独立したファイルに分割します。
+
+**tools/readfile.go** (Chapter 2から移行)
+```go
+package tools
+
+import (
+	// 必要なimport...
+)
+
+// ReadFileArgs, ReadFileResult, ReadFile関数, GetReadFileTool関数
+```
+
+**tools/list.go** (Chapter 3から移行)
+```go
+package tools
+
+import (
+	// 必要なimport...
+)
+
+// ListArgs, ListResult, List関数, GetListTool関数
+```
+
+**tools/search.go** (Chapter 3から移行)
+```go
+package tools
+
+import (
+	// 必要なimport...
+)
+
+// SearchInDirectoryArgs, SearchInDirectoryResult, SearchInDirectory関数, GetSearchInDirectoryTool関数
+```
+
+**tools/writefile.go** (Chapter 3から移行)
+```go
+package tools
+
+import (
+	// 必要なimport...
+)
+
+// WriteFileArgs, WriteFileResult, WriteFile関数, GetWriteFileTool関数
+```
+
+### 4. ツール登録管理の作成
+
+`tools/registry.go`を作成し、全ツールの登録管理を行います。
+
+```go
+package tools
+
+// GetAvailableTools は利用可能な全てのツールを返す
+func GetAvailableTools() map[string]ToolDefinition {
+	return map[string]ToolDefinition{
+		"readFile":           GetReadFileTool(),
+		"list":               GetListTool(),
+		"searchInDirectory":  GetSearchInDirectoryTool(),
+		"writeFile":          GetWriteFileTool(),
+		"editFile":           GetEditFileTool(), // 新規追加
+	}
+}
+```
+
+### 5. main.goの更新
+
+`main.go`のimport文を更新し、新しいパッケージ構造に対応します。
+
+```go
+import (
+	"bufio"
+	"context"
+	"fmt"
+	"os"
+	"strings"
+
+	"github.com/sashabaranov/go-openai"
+	"nebula/tools" // 新しいパッケージ
+)
+```
+
+ツール取得部分も更新。
+
+```go
+// 利用可能なツールを取得
+toolsMap := tools.GetAvailableTools()
+
+// ツールのスキーマを配列に変換
+var toolSchemas []openai.Tool
+for _, tool := range toolsMap {
+	toolSchemas = append(toolSchemas, tool.Schema)
+}
+```
+
+
+## editFile実装
+
+さて、リファクタリングが完了したので、いよいよ本章の核心である`editFile`ツールを実装していきます。
 
 ### Step 1: `editFile`ツールの実装
 
-まずは、既存ファイルを編集するための`editFile`ツールを実装します。これまでのツールと同じパターンに従って、新しいファイルを作成しましょう。
+:::message alert
+⚠️ **重要：editFileツールの危険性**
+`editFile`は既存ファイルを完全に上書きする非常に破壊的な操作です。ですので実行前に必ずユーザーの許可を得る設計としていきます。
+ただeditFile完成後に、実際のeditの際はgit管理下に置きリセット可能な状態にすること推奨です。
+:::
+
+モジュラー構造への移行が完了したら、いよいよ`editFile`ツールを実装します。
 
 `tools/editfile.go`を作成してください。
 
@@ -157,7 +322,7 @@ func GetEditFileTool() ToolDefinition {
 2. **ファイル存在チェック**: 新規作成と編集を明確に分離しています
 3. **完全上書き**: `os.Create`を使用してファイル全体を置き換えます
 
-次に、このツールをシステムに登録しましょう。`tools/registry.go`を編集します：
+次に、このツールをシステムに登録しましょう。`tools/registry.go`を編集します。
 
 ```go
 package tools
@@ -174,7 +339,7 @@ func GetAvailableTools() map[string]ToolDefinition {
 }
 ```
 
-そして、`main.go`の利用可能ツールの表示も更新します：
+そして、`main.go`の利用可能ツールの表示も更新します。
 
 ```go
 fmt.Println("Available tools: readFile, list, searchInDirectory, writeFile, editFile")
@@ -186,7 +351,7 @@ fmt.Println("Available tools: readFile, list, searchInDirectory, writeFile, edit
 
 #### 部分編集ツールとは
 
-部分編集ツールとは、以下のようなものです：
+部分編集ツールとは、以下のようなものです。
 
 ```go
 // 行番号指定編集
@@ -199,17 +364,13 @@ func ReplacePattern(filePath string, pattern, replacement string)
 func ApplyPatch(filePath string, patch string)
 ```
 
-#### なぜ学習用プロジェクトでは悪手なのか
-
-これはエラー処理の複雑化による理解のし難さが最大の原因です。
-
 部分編集では、以下のようなエラーが頻発します。
 
 - 構文エラーを引き起こす不完全な編集
 - インデントの不整合
 - インポート文の重複
 
-これはプロンプトを念入りに作成したり、編集に失敗した際にコード上で修正対応を行う等で回避が可能ですが、理解が難しいです。
+これはプロンプトを念入りに作成したり、編集に失敗した際、失敗内容別にコード上でLLMに修正依頼を行う等で回避が可能ですが、実装や理解が難しいです。
 例えばGeminiCLIでは編集行の前後数行のコンテキストを要求する手法を採用していますが、なかなか理解が難しいので今回は見送り、
 パフォーマンスやコストは悪いものの、理解しやすい方法としました。
 
@@ -219,27 +380,113 @@ func ApplyPatch(filePath string, patch string)
 :::
 
 
-### Step 3: Tool Callingループの実装
+### Step 2: Function Calling Loopの実装
 
-実装したeditFileツールをテストする前に、重要な問題を解決する必要があります。それは**「readFileの後にeditFileが呼ばれない」**という問題です。
+突然ですが、実装した`editFile`ツールをテストする前に、極めて重要な問題を解決する必要があります。
+それは**「readFileの後にeditFileが呼ばれない」**という根本的な問題です。
 
-現在のmain.goでは、ツール実行後に1回だけ追加のAPI呼び出しを行っていますが、重要な問題があります。**2回目のAPI呼び出しで返されたツールコールを実行していない**のです。
+Chapter 2-3の実装では、各ツールが単発で実行されることを前提としていました。
+しかし、実際のコーディング作業では、**複数のツールを連続して使用する**ことが必要です。
 
-実際の問題：
+**具体的な失敗例：Read-Modify-Write パターン**
+
+ユーザーが「sample.txtファイルの内容を変更してください」と依頼した場合：
 
 ```
-1. ユーザー入力 → LLM判断 → readFile実行
-2. readFile結果 → LLM判断 → 「editFileを実行せよ」と応答
-3. ツールコールを検出するが実行せずに終了 ←問題！
+期待される動作:
+1. ユーザー入力: "sample.txtの内容を変更してください"
+2. LLM判断: "まずファイルを読む必要がある" → readFile実行
+3. readFile結果: "現在の内容: Hello"
+4. LLM判断: "内容を変更しよう" → editFile実行
+5. editFile実行: ファイル更新完了
+
+現在の実装での実際の動作:
+1. ユーザー入力: "sample.txtの内容を変更してください"
+2. LLM判断: "まずファイルを読む必要がある" → readFile実行
+3. readFile結果: "現在の内容: Hello"
+4. LLM判断: "editFileを実行する必要がある" → ツールコール生成
+5. ⚠️ 問題: ツールコールを検出するが実行せずに終了
 ```
 
-LLMは正しく「editFileを実行せよ」と指示していますが、それを**実行せずに終了**してしまっています。
+#### 技術的な原因分析
 
-この連続したツール呼び出しを可能にするため、main.goを改修しましょう。
+問題は下記のように**1度のツール実行**で終了してしまっている部分にあります。
+
+**Chapter 2-3の`main.go`実装:**
+```go
+// 1回目のAPI呼び出し
+resp, err := client.CreateChatCompletion(...)
+responseMessage := resp.Choices[0].Message
+
+// ツールコールがある場合のみ実行
+if len(responseMessage.ToolCalls) > 0 {
+    // ツール実行後、再度APIを呼び出して最終回答を取得
+    resp, err = client.CreateChatCompletion(
+          context.Background(),
+          openai.ChatCompletionRequest{
+             Model:    openai.GPT4Dot1Nano,
+             Messages: messages,
+             Tools:    toolSchemas,
+            },
+           )
+    ...
+    if len(resp.Choices) > 0 {
+          finalMessage := resp.Choices[0].Message
+          messages = append(messages, finalMessage)
+          fmt.Printf("Assistant: %s\n\n", finalMessage.Content)   <-- ここで終了！
+     }
+}
+```
+
+**問題の本質:**
+- LLMは「editFileを実行してください」という**指示**を返す
+- しかし、**実行は行われない**
+- ユーザーには「editFileを実行してください」というメッセージが表示されるだけ
+
+
+この問題を解決するには、**ツールコールがなくなるまで繰り返し実行する**ループが必要です。
+
+```go
+// 改善後の実装概念
+for {
+    resp, err := client.CreateChatCompletion(...)
+    responseMessage := resp.Choices[0].Message
+    
+    if len(responseMessage.ToolCalls) > 0 {
+        // ツール実行
+        // ループ継続 - 次のAPI呼び出しへ
+    } else {
+        // ツールコールがない = 最終応答
+        fmt.Println(responseMessage.Content)
+        break // ループ終了
+    }
+}
+```
+
+#### Read-Modify-Write パターンの実現
+
+Function Calling Loopにより、以下の自然なワークフローが可能になります。
+
+```
+ユーザー: "config.jsonファイルでdatabase_pathを更新してください"
+    ↓
+LLM: readFileでconfig.jsonを読み込みます
+    ↓ (ループ1回目)
+readFile実行: {"model": "gpt-4.1-nano"}
+    ↓
+LLM: 現在の内容を確認しました。database_pathを追加してeditFileで更新します
+    ↓ (ループ2回目)
+editFile実行: 新しい内容で更新
+    ↓
+LLM: ファイルの更新が完了しました
+    ↓ (ループ終了)
+```
+
+この連続したツール呼び出しを可能にするため、`main.go`を**Function Calling Loop**対応に改修しましょう。
 
 #### ツール実行の関数分離
 
-まず、ツール実行の関数を分離します：
+まず、ツール実行の関数を分離します。
 
 ```go
 // executeToolCall は単一のツールコールを実行する
@@ -281,7 +528,12 @@ func processToolCalls(toolCalls []openai.ToolCall, toolsMap map[string]tools.Too
 	
 	return toolMessages
 }
+```
 
+次にLLMとのやり取り部分をhandleConversation関数に抽出し、レスポンスを処理を無限ループにします。
+
+
+```go
 // handleConversation はLLMとの対話セッションを処理する
 func handleConversation(client *openai.Client, toolSchemas []openai.Tool, toolsMap map[string]tools.ToolDefinition, userInput string, messages []openai.ChatCompletionMessage) []openai.ChatCompletionMessage {
 	// ユーザーメッセージを履歴に追加
@@ -359,22 +611,47 @@ func handleConversation(client *openai.Client, toolSchemas []openai.Tool, toolsM
 		messages = handleConversation(client, toolSchemas, toolsMap, userInput, messages)
 ```
 
-### Step 4: Read-Modify-Writeパターンの動作確認
+### Step 3: Read-Modify-Writeパターンの動作確認
 
- Tool Callingループ実装が完了したら、実際にRead-Modify-Writeパターンの動作を確認してみましょう。
+Function Callingループ実装が完了したら、実際にRead-Modify-Writeパターンの動作を確認してみましょう。
 
 まず、テスト用のファイルを作成します。
 
+**Linux/macOS の場合:**
 ```bash
 echo "Hello World" > sample.txt
 ```
 
-nebulaを起動して、以下の指示を与えてみてください：
+**Windows の場合:**
+```cmd
+echo Hello World > sample.txt
+```
 
+次に、プロジェクトをビルドします。
+
+**Linux/macOS の場合:**
 ```bash
 go build -o nebula .
+```
+
+**Windows の場合:**
+```bash
+go build -o nebula.exe .
+```
+
+そして実行します。
+
+**Linux/macOS の場合:**
+```bash
 ./nebula
 ```
+
+**Windows の場合:**
+```cmd
+nebula.exe
+```
+
+実行後、以下の指示を与えてみてください。
 
 ```
 sample.txtのHello WorldをHello Nebulaに変更してください
@@ -403,156 +680,73 @@ Assistant: sample.txtファイルの内容を「Hello World」から「Hello Neb
 - editFileが自動的に呼び出される
 - ユーザーの許可を得てから実際の編集が実行される
 
-### Step 5: ツールスキーマDescriptionの重要性
+#### 追加テスト：ファイルに新しい行を追加
 
-`editFile`ツールの`Description`をもう一度見てください。
-
-```go
-Description: "既存ファイルの内容を完全に上書きします。重要: ファイルを破壊しないために、必ず以下のワークフローに従ってください: 1. 'readFile'を使用して現在の完全な内容を取得する。2. 思考プロセスで、読み取った内容を基に新しいファイルの完全版を構築する。3. このツールを使用して完全な新しい内容を書き込む。部分的な編集には使用しないでください。常にファイル全体の内容を提供してください。実行前にユーザーの許可を求めます。"
-```
-
-これは単なる説明文ではありません。**LLMの行動を制御する重要な指示**となっています。
-
-#### Descriptionが果たす役割
-
-**1. 行動パターンの強制**
-「必ず以下のワークフローに従ってください」という文言により、LLMにRead-Modify-Writeパターンを強制しています。
-
-**2. 危険な使用方法の防止**
-「部分的な編集には使用しないでください」により、誤った使用を防いでいます。
-
-**3. 前提条件の明確化**
-「readFileを使用して現在の完全な内容を取得する」により、必要な前処理を指示しています。
-
-#### 実験：Descriptionを簡素にしてみる
-
-試しに、`editFile`のDescriptionを簡潔にしてみてください。
-
-```go
-Description: "ファイルを編集します。"
-```
-
-パラメータのDescriptionも簡素にします。
-
-```go
-"new_content": {
-    Type:        jsonschema.String,
-    Description: "新しい内容",
-}
-```
-
-この状態で、sample.txtを下記のようにしてみてください。
+続いて、以下のテストを実行してみてください。
 
 ```
-これはテスト用のファイルです。
-nebulaのreadFileツールがこのファイルを正しく読み込めるかをテストしています。
-
-ファイルの内容:
-- 行1: Hello World
-- 行2: こんにちは世界
-- 行3: Function Calling is working! 
+sample.txtにNewContentという文を追加してください
 ```
 
-
-ここまでできたら以下のテストを実行してみてください。
-
-```
-sample.txtに「Hello」という文字列を追加してください
-```
-
-**簡素なDescriptionでの実際の動作例**：
+正常に動作していれば、以下のような流れでRead-Modify-Writeパターンが自然に実行されます。
 
 ```
 Assistant is using tools...
-Executing tool: writeFile with arguments: {"content":"Hello","path":"sample.txt"}
-Tool 'writeFile' executed with result: {"success":false,"error":"ファイルが既に存在します。既存ファイルの編集にはeditFileを使用してください。"}
+Executing tool: readFile with arguments: {"path":"sample.txt"}
+Tool 'readFile' executed with result: {"content":"Hello Nebula\n"}
 
 Assistant is using tools...
-Executing tool: editFile with arguments: {"new_content":"Hello","path":"sample.txt"}
+Executing tool: editFile with arguments: {"path":"sample.txt","new_content":"Hello Nebula\n新しい行\n"}
 
 既存ファイルを編集します: sample.txt
 実行してもよろしいですか？ (y/N): y
 
 Tool 'editFile' executed with result: {"success":true}
+Assistant: sample.txtに新しい行を追加しました。
 ```
 
-**問題点**：
-1. **Read-Modify-Writeの省略**: `readFile`を呼ばずに直接`editFile`
-2. **既存内容の消失**: 「追加」のつもりが完全上書きに
+**Read-Modify-Writeパターンの重要なポイント**：
+- `readFile`で現在の内容を取得
+- 既存内容に新しい行を追加した完全なファイルを構築
+- `editFile`で完全な新しい内容に置き換え
 
-**詳細なDescriptionでの動作**：
-
-```
-Assistant is using tools...
-Executing tool: readFile with arguments: {"path":"sample.txt"}
-Tool 'readFile' executed with result: {"content":"元の内容\n"}
-
-Assistant is using tools...
-Executing tool: editFile with arguments: {"path":"sample.txt","new_content":"元の内容\nHello\n"}
-```
-
-**改善点**：
-- 最初から正しいツールを選択
-- 既存内容を保持した追加
-- 安全なワークフロー
-
-簡素なDescriptionでもLLMの賢さのために上手くいく時はあるものの、やはり詳細なDescriptionとは成功率が違うので、なるべく詳細に書くことをお勧めします。
-(詳細に書きすぎても指示忘れが起こってしまう等があるのが難しいところですが)
+この動作により、ファイルの内容が安全に保たれながら編集が実行されます。
 
 
-### Step 6: 今のエージェントの限界
+### Step 4: 現在のエージェントの限界と次のステップ
 
-現在のエージェントは素晴らしい能力を持っていますが、まだ限界があります。以下のような複雑なタスクを試してみてください。
+現在のエージェントは基本的なファイル操作ができるようになりましたが、まだ重要な限界があります。
 
-#### テスト1: 複数ファイル編集
+#### 複雑なタスクでの問題
+
+以下のような複雑なタスクを試してみてください。
 
 ```
 tools/writeFile.goを参考に、tools/copyFile.goを作成してください。ファイルをコピーする機能を実装し、tools/registry.goに登録してください
 ```
 
-このテストを実行すると、以下のような問題が発生するはずです。
+現在の実装では、以下のような問題が発生します。
 
-1. **思考プロセスの欠如**: 参考ファイルを読まずにいきなり実装を始める
-2. **プロジェクト構造の誤解**: 間違ったパッケージ宣言や不適切なインポート
-3. **一貫性の欠如**: 既存のコードスタイルと異なる実装
-
-#### テスト2: 複雑な機能追加
-
-```
-このプロジェクトにログ機能を追加してください。適切な場所にログファイルを作成し、main.goとツール群でログを出力するようにしてください
-```
-
-このような曖昧な指示では、現在のエージェントは以下の理由で困惑します：
-
-1. **「適切な場所」がわからない**: プロジェクト構造の理解が不足
-2. **既存コードとの統合方法がわからない**: アーキテクチャの理解が不足
-3. **一貫した実装ができない**: 統一された思考プロセスがない
+1. **体系的な探索の欠如**: 参考ファイルを読まずにいきなり実装を始める
+2. **プロジェクト理解の不足**: 既存のコードスタイルやパターンを理解しない
+3. **段階的な実装プロセスの欠如**: 計画→実装→検証の流れがない
 
 #### なぜこれらの限界が存在するのか
 
-現在のnebulaには、以下が欠けています：
+現在のnebulaには**システムプロンプト**が欠けています。システムプロンプトは、エージェントの「思考プロセス」や「行動指針」を定義する重要な仕組みです。
 
-**1. システムプロンプト（思考プロセス）**
-- どのような順序で考え、行動すべきかの指針
-- 探索 → 計画 → 実装 の段階的プロセス
-- エラーハンドリングや一貫性の確保
+**システムプロンプトで実現できること**：
+- 体系的な探索→計画→実装の段階的プロセス
+- プロジェクト構造の理解と一貫性の確保
+- エラーハンドリングと品質管理
+- 明確な役割と制約に基づく判断
 
-**2. プロジェクトコンテキスト**
-- このプロジェクトがどのような構造を持っているか
-- どのようなアーキテクチャを採用しているか
-- どこに何を配置すべきかの知識
+#### 次のChapterでの進化
 
-次章からは上記のような複雑なタスクもできるようにしていきます。
+Chapter 5では、これらの限界を克服するために**システムプロンプト**を実装します。
+システムプロンプトにより、nebulaは単なるツール実行者から、本格的な**コーディングエージェント**へと進化します。
 
-**Chapter 5**では、nebulaに「思考プロセス」を与えます。システムプロンプトにより、エージェントは以下のような能力を獲得します。
-
-- 体系的な探索と分析
-- 段階的な計画立案
-- 一貫した実装パターン
-
-**Chapter 6**では、さらに「プロジェクト理解能力」を追加し、曖昧な指示からでも適切な機能追加ができるようになります。
-
-現在のnebulaでも十分実用的ですが、これらの限界体験により「なぜ次の機能が必要なのか」が明確になったのではないでしょうか。
+現在のnebulaでも基本的なファイル操作は可能ですが、次のChapterでより高度で信頼性の高いエージェントになる基盤が整いました。
 
 
 ## この章のまとめと次のステップ
@@ -564,39 +758,22 @@ tools/writeFile.goを参考に、tools/copyFile.goを作成してください。
 **実装した機能**：
 - **`editFile`ツール**: 既存ファイルの安全な編集
 - **ユーザー許可システム**: 危険な操作の事前確認
-- **Tool Callingループ**: 複数ツールの連続実行
-- **Read-Modify-Write強制**: ツールスキーマでの行動制御
+- **Function Callingループ**: 複数ツールの連続実行
+- **モジュラー構造**: ツールの分割と管理の改善
 
 **学んだ重要概念**：
 - **Read-Modify-Writeパターン**: 安全で確実なファイル編集手法
-- **ツールスキーマの重要性**: LLMの行動制御における詳細な説明文の価値
-- **状態管理の複雑さ**: 部分編集ツールが学習用途で悪手である理由
 - **Function Callingの最適化**: ループ処理による連続ツール実行
-
-### 現在のファイル構成
-
-```
-nebula/
-├── main.go                  # リファクタリング済みのメインプログラム
-├── tools/
-│   ├── common.go           # 共通型定義
-│   ├── registry.go         # ツール登録（editFile追加済み）
-│   ├── readfile.go         # ファイル読み取り
-│   ├── list.go             # ディレクトリ一覧
-│   ├── search.go           # キーワード検索
-│   ├── writefile.go        # 新規ファイル作成
-│   └── editfile.go         # ★ ファイル編集（新規追加）
-├── go.mod
-├── go.sum
-└── sample.txt              # テスト用ファイル
-```
+- **ユーザー安全性**: 破壊的操作の事前確認の重要性
 
 ### 次のステップ
 
-Chapter5では、システムプロンプトを記載していきます。システムプロンプトにより、エージェントは以下のような能力を持ちます。
+Chapter 5では、**システムプロンプト**を実装します。これにより、エージェントは以下のような高度な能力を獲得します。
 
-- **体系的思考**: 探索 → 計画 → 実装の段階的プロセス
+- **体系的思考**: 探索→計画→実装の段階的プロセス
 - **一貫した行動**: 明確な役割と制約に基づく判断
+- **プロジェクト理解**: 既存コードの構造とパターンの把握
 
-現在はまだまだ公にあるコーディングエージェントとは遠く感じるしれませんが、次回からどんどんコーディングエージェントらしさを増していきます。
+Chapter 4で基本的なツール機能を実装し、Chapter 5でより高度な思考プロセスを追加することで、nebulaは本格的なコーディングエージェントへと進化します。
+
 それでは次のChapterに行きましょう！

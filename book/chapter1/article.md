@@ -8,8 +8,25 @@
 
 この章が終わる頃には。GPTと自由に会話できるプログラムが完成し、次章で実装するFunction Calling（ツール機能）の土台が整います。
 
+## 📁 この章での到達目標構造
 
-## ハンズオン・チュートリアル
+```
+nebula/
+├── main.go                 # 基本的なCLI + OpenAI API呼び出し
+├── go.mod                  # モジュール定義
+└── go.sum                  # 依存関係ロック
+```
+
+**実装する機能:**
+- 基本的なOpenAI API呼び出し
+- 簡単なCLI実装
+- 会話ループ
+
+**依存関係:**
+- `github.com/sashabaranov/go-openai`
+
+
+## 基本CLI実装
 
 ### 1. Goプロジェクトのセットアップ
 
@@ -38,7 +55,7 @@ go 1.23.1
 go get github.com/sashabaranov/go-openai
 ```
 
-実行すると、`go.mod`に依存関係が追加され、`go.sum`ファイルも生成されます：
+実行すると、`go.mod`に依存関係が追加され、`go.sum`ファイルも生成されます。
 
 ```go
 // go.mod (更新後)
@@ -53,7 +70,7 @@ require github.com/sashabaranov/go-openai v1.40.3 // indirect
 
 OpenAI APIを使うには、APIキーが必要です。セキュリティの観点から、APIキーはコードに直接書かず、環境変数から読み込むのがベストプラクティスです。
 
-まず、OpenAIのWebサイトでAPIキーを取得し、環境変数にセットしましょう：
+まず、OpenAIのWebサイトでAPIキーを取得し、環境変数にセットしましょう。
 
 ```bash
 export OPENAI_API_KEY=your_api_key_here
@@ -68,10 +85,12 @@ export OPENAI_API_KEY=your_api_key_here
 5. 生成されたキーをコピーして環境変数にセット
 :::
 
-注意:
- 2025/07現在、APIKeyを使用するためには最初に5ドル支払いが必要です。
- GPT4.1-nanoを使用する限り1000回呼び出しても0.2ドルくらいなので特に5ドルを超える心配はいりません。
- 右上の歯車マークをクリック -> Billingをクリックし、Auto recharge is offとなっていれば追加で支払いも行われないので安心です。
+:::message alert
+⚠️ **重要：OpenAI API使用料金について**
+2025年1月現在、OpenAI APIを使用するためには最初に5ドルの支払いが必要です。
+本書で使用するGPT-4.1-nano、GPT-4.1-miniは1000回呼び出しても約0.5~0.6ドル程度なので、5ドルを超える心配はほとんどありません。
+Auto rechargeをOFFにしておけば追加の支払いも発生しません。
+:::
 
 
 ### 4. メインプログラムの実装
@@ -157,7 +176,7 @@ func main() {
 
 ### コードの解説
 
-このプログラムの各部分を詳しく見ていきましょう：
+このプログラムの各部分を詳しく見ていきましょう。
 
 **1. APIキーの安全な読み込み**
 ```go
@@ -202,7 +221,9 @@ resp, err := client.CreateChatCompletion(
 
 ### Chat Completions APIの詳細仕様
 
-OpenAIのChat Completions APIは、現代的な会話型AIの基盤となるAPIです。主要なパラメータを理解しておきましょう：
+OpenAIのChat Completions APIは、現代的な会話型AIの基盤となるAPIです。
+
+:::details Chat Completions APIの主要パラメータ
 
 **主要パラメータ：**
 
@@ -230,7 +251,7 @@ openai.ChatMessageRoleTool
 
 **レスポンス構造：**
 
-APIのレスポンスは以下のような構造になっています：
+APIのレスポンスは以下のような構造になっています。
 
 ```json
 {
@@ -250,6 +271,7 @@ APIのレスポンスは以下のような構造になっています：
   }
 }
 ```
+:::
 
 :::message
 **参考リンク**
@@ -262,7 +284,7 @@ APIのレスポンスは以下のような構造になっています：
 
 これでこの章の機能が動くようになりました！実際に試してみましょう。
 
-まず、プログラムをビルドします：
+まず、プログラムをビルドします。
 
 **Linux/macOS の場合:**
 ```bash
@@ -274,7 +296,7 @@ go build -o nebula .
 go build -o nebula.exe .
 ```
 
-実行可能ファイルが生成されるので、実行してみましょう：
+実行可能ファイルが生成されるので、実行してみましょう。
 
 **Linux/macOS の場合:**
 ```bash
@@ -310,13 +332,27 @@ Goodbye!
 
 :::message alert
 **トラブルシューティング**
-- `Error: OPENAI_API_KEY environment variable is not set`が出る場合：環境変数の設定を確認してください
-- API呼び出しでエラーが出る場合：APIキーが正しく設定されているか、OpenAIアカウントに残高があるかを確認してください
+
+よくある問題と解決方法。
+
+**問題1**: `Error: OPENAI_API_KEY environment variable is not set`
+- **原因**: 環境変数が正しく設定されていない
+- **解決策**: `export OPENAI_API_KEY=your_api_key_here` を実行後、`echo $OPENAI_API_KEY` で確認
+
+**問題2**: API呼び出しでエラーが発生
+- **原因**: APIキーの問題または残高不足
+- **解決策**: 
+  1. APIキーが正しいか確認
+  2. OpenAI Platformで残高確認
+
+**問題3**: ビルドエラーが発生
+- **原因**: Go言語のバージョンが古い
+- **解決策**: `go version` で1.23.1以上であることを確認
 :::
 
 ## この章のまとめと次のステップ
 
-この章では、GoからOpenAI APIを呼び出す基本的なCLIアプリケーションを作成しました。完成したコードの構造は以下の通りです：
+この章では、GoからOpenAI APIを呼び出す基本的なCLIアプリケーションを作成しました。完成したコードの構造は以下の通りです。
 
 ### 作成したファイル一覧
 

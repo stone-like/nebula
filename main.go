@@ -168,14 +168,14 @@ func handleConversation(client *openai.Client, cfg *config.Config, memoryManager
 	if len(messages) > 0 && messages[0].Role == openai.ChatMessageRoleSystem {
 		hasSystemPrompt = true
 	}
-	
+
 	if !hasSystemPrompt {
 		// システムプロンプトを先頭に追加
-		systemMessage := openai.ChatCompletionMessage{
-			Role:    openai.ChatMessageRoleSystem,
-			Content: getSystemPrompt(),
-		}
-		messages = append([]openai.ChatCompletionMessage{systemMessage}, messages...)
+		// systemMessage := openai.ChatCompletionMessage{
+		// 	Role:    openai.ChatMessageRoleSystem,
+		// 	Content: getSystemPrompt(),
+		// }
+		// messages = append([]openai.ChatCompletionMessage{systemMessage}, messages...)
 	}
 
 	// ユーザーメッセージを履歴に追加
@@ -241,7 +241,7 @@ func handleConversation(client *openai.Client, cfg *config.Config, memoryManager
 		} else {
 			// ツールコールがない場合は最終応答
 			fmt.Printf("Assistant: %s\n\n", responseMessage.Content)
-			
+
 			// アシスタントメッセージをメモリに保存
 			memoryManager.SaveMessage("assistant", responseMessage.Content, nil, nil)
 			break
@@ -258,12 +258,12 @@ func handleModelSwitch(cfg *config.Config) {
 	fmt.Println("1. gpt-4.1-nano (default, faster)")
 	fmt.Println("2. gpt-4.1-mini (complex tasks)")
 	fmt.Print("Select model (1 or 2): ")
-	
+
 	scanner := bufio.NewScanner(os.Stdin)
 	if scanner.Scan() {
 		choice := strings.TrimSpace(scanner.Text())
 		var newModel string
-		
+
 		switch choice {
 		case "1":
 			newModel = "gpt-4.1-nano"
@@ -273,7 +273,7 @@ func handleModelSwitch(cfg *config.Config) {
 			fmt.Println("Invalid choice. No changes made.")
 			return
 		}
-		
+
 		if err := cfg.SetModel(newModel); err != nil {
 			fmt.Printf("Error setting model: %v\n", err)
 		} else {
@@ -288,17 +288,17 @@ func handleModeSwitch(planMode *bool) {
 	if *planMode {
 		currentMode = "PLAN"
 	}
-	
+
 	fmt.Printf("Current mode: %s\n", currentMode)
 	fmt.Println("Available modes:")
 	fmt.Println("1. AGENT (full capabilities)")
 	fmt.Println("2. PLAN (read-only, safe exploration)")
 	fmt.Print("Select mode (1 or 2): ")
-	
+
 	scanner := bufio.NewScanner(os.Stdin)
 	if scanner.Scan() {
 		choice := strings.TrimSpace(scanner.Text())
-		
+
 		switch choice {
 		case "1":
 			*planMode = false
@@ -348,7 +348,7 @@ func main() {
 	// セッション管理
 	var messages []openai.ChatCompletionMessage
 	var currentSession *memory.Session
-	
+
 	// 既存セッションを表示
 	sessions, err := memoryManager.GetCurrentProjectSessions(5)
 	if err != nil {
@@ -367,17 +367,17 @@ func main() {
 			fmt.Printf("%d. %s (%s) - %s\n", i+1, session.ID, status, lastMsg)
 		}
 		fmt.Print("Start new session or restore (new/1-5): ")
-		
+
 		scanner := bufio.NewScanner(os.Stdin)
 		if scanner.Scan() {
 			choice := strings.TrimSpace(scanner.Text())
-			
+
 			if choice != "new" && choice != "" {
 				// セッション番号をパース
 				if sessionIndex, err := strconv.Atoi(choice); err == nil {
 					if sessionIndex >= 1 && sessionIndex <= len(sessions) {
 						selectedSession := sessions[sessionIndex-1]
-						
+
 						// セッションを復元
 						restoredSession, err := memoryManager.RestoreSession(selectedSession.ID)
 						if err != nil {
@@ -385,7 +385,7 @@ func main() {
 						} else {
 							currentSession = restoredSession
 							fmt.Printf("Restored session: %s\n", restoredSession.ID)
-							
+
 							// 過去の会話履歴を読み込み
 							memoryMessages, err := memoryManager.GetSessionMessages(selectedSession.ID)
 							if err != nil {
@@ -405,7 +405,7 @@ func main() {
 			}
 		}
 	}
-	
+
 	// 新しいセッションを開始（復元しなかった場合）
 	if currentSession == nil {
 		session, err := memoryManager.StartSession(currentDir, cfg.Model)
@@ -438,7 +438,7 @@ func main() {
 	fmt.Println("Commands:")
 	fmt.Println("  'exit' or 'quit' - End the conversation")
 	fmt.Println("  'model' - Switch between models")
-	fmt.Println("  'mode' - Interactive mode switching")  
+	fmt.Println("  'mode' - Interactive mode switching")
 	fmt.Println("  'plan' - Switch to PLAN mode (read-only)")
 	fmt.Println("  'agent' - Switch to AGENT mode (full capabilities)")
 	fmt.Println("---")
@@ -500,18 +500,18 @@ func main() {
 // convertToOpenAIMessages converts memory messages to OpenAI format
 func convertToOpenAIMessages(memoryMessages []*memory.Message) []openai.ChatCompletionMessage {
 	var messages []openai.ChatCompletionMessage
-	
+
 	for _, msg := range memoryMessages {
 		// Skip tool messages for now (they are complex to restore properly)
 		if msg.Role == "tool" {
 			continue
 		}
-		
+
 		messages = append(messages, openai.ChatCompletionMessage{
 			Role:    msg.Role,
 			Content: msg.Content,
 		})
 	}
-	
+
 	return messages
 }

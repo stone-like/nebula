@@ -1,7 +1,1 @@
-これはテスト用のファイルです。
-nebulaのreadFileツールがこのファイルを正しく読み込めるかをテストしています。
-
-ファイルの内容:
-- 行1: Hello World
-- 行2: こんにちは世界
-- 行3: Function Calling is working!
+Hello World
