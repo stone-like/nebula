@@ -12,14 +12,21 @@ import (
 
 // Config represents the nebula configuration
 type Config struct {
-	Model  string `json:"model"`
-	APIKey string `json:"-"` // APIキーは設定ファイルに保存しない
+	Model        string `json:"model"`
+	DatabasePath string `json:"database_path"`
+	MaxSessions  int    `json:"max_sessions"`
+	APIKey       string `json:"-"` // APIキーは設定ファイルに保存しない
 }
 
 // DefaultConfig returns the default configuration
 func DefaultConfig() *Config {
+	homeDir, _ := os.UserHomeDir()
+	defaultDBPath := filepath.Join(homeDir, ".nebula", "memory.db")
+	
 	return &Config{
-		Model: "gpt-4.1-nano", // デフォルトはgpt-4.1-nano
+		Model:        "gpt-4.1-nano", // デフォルトはgpt-4.1-nano
+		DatabasePath: defaultDBPath,
+		MaxSessions:  100,
 	}
 }
 

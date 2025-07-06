@@ -9,7 +9,7 @@ This is `nebula`, a learning project for building an autonomous coding agent wri
 1. **Primary Goal**: Add new features to layered architecture projects (like Clean Architecture) with minimal instructions
 2. **Secondary Goal**: Build small projects (CLI tools, web APIs) from scratch through interactive dialogue
 
-The project follows a chapter-based development approach, currently completed through Chapter 5 (Gemini CLI-inspired system prompt with strict execution protocols and safe JSON processing).
+The project follows a chapter-based development approach, **now fully completed through Chapter 6** with persistent memory, dynamic mode switching, and session restoration capabilities.
 
 ## Common Development Commands
 
@@ -35,11 +35,15 @@ export OPENAI_API_KEY=your_api_key_here
 # Verify Go version (requires Go 1.23.1+)
 go version
 
-# Model switching commands (interactive)
+# Interactive commands
 ./nebula
 # Type "model" to switch between:
 # 1. gpt-4.1-nano (default, faster)
 # 2. gpt-4.1-mini (complex tasks)
+#
+# Type "plan" to switch to read-only planning mode
+# Type "agent" to switch to full execution mode
+# Type "mode" for interactive mode switching
 ```
 
 ### Testing and Dependencies
@@ -56,13 +60,16 @@ go clean -modcache
 
 ## Architecture
 
-### Current Implementation (Through Chapter 5)
+### Current Implementation (Completed through Chapter 6)
 
-The project implements a complete OpenAI chat CLI with Function Calling support and strict execution protocols:
+The project implements a complete autonomous coding agent with persistent memory, dynamic mode switching, and session restoration:
 - **main.go**: Core chat loop with OpenAI GPT-4.1-nano integration, tool orchestration with loop-based tool calling, and Gemini CLI-inspired system prompt
 - **tools/** package: Complete modular tool system with all basic file operations, safety features, and safe JSON processing
-- **Environment-based API key management**
-- **Conversation history handling**
+- **memory/** package: SQLite-based persistent memory system with session management and conversation history
+- **config/** package: Configuration management with model selection and settings persistence
+- **Dynamic mode switching**: Real-time switching between PLAN (read-only) and AGENT (full capabilities) modes
+- **Session restoration**: Complete conversation history restoration across sessions
+- **Project-specific memory**: Independent session management per project directory
 - **User permission system** for destructive operations (writeFile and editFile)
 - **Read-Modify-Write pattern** enforcement for safe file editing through detailed tool descriptions
 - **Strict execution protocol** preventing assumptions and enforcing information gathering before implementation
@@ -91,9 +98,9 @@ The agent operates under a strict Gemini CLI-inspired system prompt that enforce
 - **Phase 2: Implementation (Only after Phase 1)** - Use writeFile/editFile to make changes
 - **Self-Verification Checklist** - Ensures all required information has been gathered
 
-### Current Development Status (Updated)
+### Current Development Status (Completed)
 - **Chapter 5**: Complete with model selection and configuration management
-- **Chapter 6 (Planned)**: Final features including `plan` mode and persistent memory
+- **Chapter 6**: ✅ **COMPLETED** - Persistent memory, dynamic mode switching, and session restoration
 
 ## Code Structure and Patterns
 
@@ -144,9 +151,14 @@ All file edits MUST follow the "Read-Modify-Write" pattern enforced by detailed 
 
 ## Project Structure
 
-- `main.go`: CLI application entry point with OpenAI integration, tool orchestration, and system prompt
+- `main.go`: CLI application entry point with OpenAI integration, tool orchestration, system prompt, and session management
 - `config/`: Configuration management package
-  - `config.go`: Model selection and settings file management
+  - `config.go`: Model selection, database path, and settings file management
+- `memory/`: Persistent memory package (Chapter 6)
+  - `manager.go`: Memory manager with session lifecycle management
+  - `models.go`: Session and Message data structures
+  - `database.go`: SQLite database initialization and connection management
+  - `queries.go`: SQL operations for sessions and messages
 - `tools/`: Modular tool package with individual tool implementations
   - `common.go`: Shared types and definitions
   - `registry.go`: Tool registration and management  
@@ -157,7 +169,7 @@ All file edits MUST follow the "Read-Modify-Write" pattern enforced by detailed 
 - `spec.md`: Complete technical specification in Japanese
 - `tasks.md`: Chapter-based learning curriculum with progress tracking
 - `book/`: Chapter-by-chapter tutorial content (Zenn book format)
-- `go.mod`/`go.sum`: Go module definition and dependencies
+- `go.mod`/`go.sum`: Go module definition and dependencies (includes modernc.org/sqlite)
 
 ## Tool Testing Commands
 
@@ -230,13 +242,14 @@ git reset --hard HEAD~1 && git clean -fd
 
 ## Chapter Progress and Learning Path
 
-### Completed (Chapter 1-5)
+### Completed (Chapter 1-6) ✅
 - ✅ OpenAI API integration and basic chat functionality
 - ✅ Function Calling implementation with complete tool set
 - ✅ Tool Calling loops for continuous multi-tool execution
 - ✅ Read-Modify-Write pattern for safe file editing
 - ✅ User permission system for destructive operations
-- ✅ **Chapter 5**: Complete with model selection (gpt-4.1-nano/mini) and configuration file management (~/.nebula/config.json)
+- ✅ **Chapter 5**: Model selection (gpt-4.1-nano/mini) and configuration file management (~/.nebula/config.json)
+- ✅ **Chapter 6**: Persistent memory, dynamic mode switching, and session restoration
 
 ### Resolved Issues (Chapter 5)
 - ✅ **editFile character encoding problem**: RESOLVED - Added UTF-8 validation and safe JSON processing to prevent control characters and invalid Unicode
@@ -244,11 +257,25 @@ git reset --hard HEAD~1 && git clean -fd
 - ✅ **LLM assumption behavior**: RESOLVED - Gemini CLI-inspired system prompt prevents guessing and enforces information gathering
 - ✅ **Inconsistent execution patterns**: RESOLVED - Strict phase-based execution protocol ensures consistent behavior
 
-### Planned Features (Chapter 6)
-- **Model switching**: GPT-4.1-nano (default) and GPT-4.1-mini (complex tasks)
-- **Plan mode**: Read-only mode for safe planning before execution
-- **Persistent memory**: Session storage for conversation history and context
-- **Configuration management**: File-based settings beyond environment variables
+### Chapter 6 Implementation Highlights (Completed) ✅
+
+**Persistent Memory System:**
+- **SQLite Database**: `modernc.org/sqlite` for cross-platform compatibility without CGO dependencies
+- **Session Management**: Project-specific session storage with automatic session lifecycle management
+- **Message Persistence**: Complete conversation history with user, assistant, and tool messages
+- **Session Restoration**: Full conversation context restoration across sessions
+
+**Dynamic Mode Switching:**
+- **PLAN Mode**: Read-only mode that blocks writeFile/editFile for safe exploration and planning
+- **AGENT Mode**: Full capabilities mode with all tool access
+- **Real-time Switching**: `plan`/`agent` commands for instant mode changes during conversation
+- **Interactive Mode Selection**: `mode` command for guided mode switching
+
+**Enhanced User Experience:**
+- **Session Selection**: Interactive session restoration with preview of recent conversations
+- **Mode Indicators**: Clear visual indicators showing current mode in prompts `[AGENT]` / `[PLAN]`
+- **Memory Status**: Always-on memory with simplified configuration (no enable/disable complexity)
+- **Conversation Continuity**: Seamless continuation of interrupted work sessions
 
 ### Chapter 5 Implementation Highlights
 
@@ -272,13 +299,13 @@ git reset --hard HEAD~1 && git clean -fd
 
 ## Development Approach
 
-This codebase follows a **simplified, focused approach** for Chapter 6 completion:
+This codebase follows a **simplified, focused approach** and has completed all planned features:
 
-### Current Priority (Chapter 5 → 6)
-1. **Model switching functionality** for handling complex tasks with GPT-4.1-mini
-2. **Basic configuration management** beyond environment variables
-3. **Plan mode** for safe pre-execution planning
-4. **Persistent memory** for session continuity
+### Completed Features (Chapter 6) ✅
+1. ✅ **Model switching functionality** for handling complex tasks with GPT-4.1-mini
+2. ✅ **Configuration management** with simplified settings structure
+3. ✅ **Plan mode** for safe pre-execution planning with dynamic switching
+4. ✅ **Persistent memory** for session continuity with SQLite backend
 
 ### Removed Complexity
 - Removed: Complex `init` functionality and automatic `NEBULA.md` generation
@@ -291,4 +318,21 @@ The `test/` directory contains validation projects:
 - **`task-cli/`**: Simple CLI for basic feature addition testing
 - **`ecommerce-platform/`**: Microservices architecture for complex integration testing
 
-This codebase serves as a learning project demonstrating the evolution from basic LLM interaction to sophisticated autonomous coding capabilities with practical, focused implementation.
+## Final Status
+
+**nebula** is now a **complete autonomous coding agent** that has successfully evolved from basic LLM interaction to sophisticated coding capabilities. The project demonstrates:
+
+### Key Achievements ✅
+- **Full Tool Integration**: Complete file system operations with safety features
+- **Persistent Memory**: SQLite-based session management across project directories
+- **Dynamic Workflows**: Real-time switching between planning and execution modes
+- **Production Ready**: Practical implementation suitable for real development workflows
+- **Learning Foundation**: Complete chapter-based progression showing agent development principles
+
+### Ideal Use Cases
+1. **Adding features to existing projects**: Clean Architecture, microservices, or any structured codebase
+2. **Iterative development**: Plan with PLAN mode, execute with AGENT mode
+3. **Learning and experimentation**: Safe exploration of codebases before making changes
+4. **Continuation of interrupted work**: Session restoration maintains full context across sessions
+
+**nebula** represents a successful implementation of an autonomous coding agent that balances power with safety, providing both educational value and practical utility for software development tasks.
