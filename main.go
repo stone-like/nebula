@@ -312,6 +312,111 @@ func handleModeSwitch(planMode *bool) {
 	}
 }
 
+// startNewSession creates a new session and returns empty messages
+func startNewSession(memoryManager *memory.Manager, currentDir, model string) ([]openai.ChatCompletionMessage, error) {
+	session, err := memoryManager.StartSession(currentDir, model)
+	if err != nil {
+		return nil, fmt.Errorf("failed to start new session: %w", err)
+	}
+	fmt.Printf("Started new session: %s\n", session.ID)
+	return []openai.ChatCompletionMessage{}, nil
+}
+
+// convertToOpenAIMessages converts memory messages to OpenAI format
+func convertToOpenAIMessages(memoryMessages []*memory.Message) []openai.ChatCompletionMessage {
+	var messages []openai.ChatCompletionMessage
+
+	for _, msg := range memoryMessages {
+		// Skip tool messages for now (they are complex to restore properly)
+		if msg.Role == "tool" {
+			continue
+		}
+
+		messages = append(messages, openai.ChatCompletionMessage{
+			Role:    msg.Role,
+			Content: msg.Content,
+		})
+	}
+
+	return messages
+}
+
+// handleSessionSelection handles session selection and restoration
+func handleSessionSelection(memoryManager *memory.Manager, currentDir, model string) ([]openai.ChatCompletionMessage, error) {
+	// 既存セッションを取得
+	sessions, err := memoryManager.GetCurrentProjectSessions(5)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load sessions: %w", err)
+	}
+
+	// セッションがない場合は新規作成
+	if len(sessions) == 0 {
+		return startNewSession(memoryManager, currentDir, model)
+	}
+
+	// 既存セッションを表示
+	fmt.Printf("Found %d previous sessions for this project:\n", len(sessions))
+	for i, session := range sessions {
+		status := "completed"
+		if session.EndedAt == nil {
+			status = "active"
+		}
+		lastMsg := session.LastMessage
+		if len(lastMsg) > 50 {
+			lastMsg = lastMsg[:50] + "..."
+		}
+		fmt.Printf("%d. %s (%s) - %s\n", i+1, session.ID, status, lastMsg)
+	}
+	fmt.Print("Start new session or restore (new/1-5): ")
+
+	// ユーザー選択を取得
+	scanner := bufio.NewScanner(os.Stdin)
+	if !scanner.Scan() {
+		return nil, fmt.Errorf("failed to read user input")
+	}
+	choice := strings.TrimSpace(scanner.Text())
+
+	// 新規セッション選択
+	if choice == "new" || choice == "" {
+		return startNewSession(memoryManager, currentDir, model)
+	}
+
+	// セッション番号をパース
+	sessionIndex, err := strconv.Atoi(choice)
+	if err != nil {
+		fmt.Println("Invalid input. Starting new session.")
+		return startNewSession(memoryManager, currentDir, model)
+	}
+
+	// セッション番号の範囲チェック
+	if sessionIndex < 1 || sessionIndex > len(sessions) {
+		fmt.Println("Invalid session number. Starting new session.")
+		return startNewSession(memoryManager, currentDir, model)
+	}
+
+	// セッションを復元
+	selectedSession := sessions[sessionIndex-1]
+	restoredSession, err := memoryManager.RestoreSession(selectedSession.ID)
+	if err != nil {
+		fmt.Printf("Error restoring session: %v\n", err)
+		return startNewSession(memoryManager, currentDir, model)
+	}
+
+	fmt.Printf("Restored session: %s\n", restoredSession.ID)
+
+	// 過去の会話履歴を読み込み
+	memoryMessages, err := memoryManager.GetSessionMessages(selectedSession.ID)
+	if err != nil {
+		fmt.Printf("Error loading session messages: %v\n", err)
+		return startNewSession(memoryManager, currentDir, model)
+	}
+
+	// OpenAI形式に変換
+	messages := convertToOpenAIMessages(memoryMessages)
+	fmt.Printf("Loaded %d previous messages\n", len(messages))
+	return messages, nil
+}
+
 func main() {
 	// デフォルトはagentモード
 	planMode := false
@@ -346,75 +451,10 @@ func main() {
 	}
 
 	// セッション管理
-	var messages []openai.ChatCompletionMessage
-	var currentSession *memory.Session
-
-	// 既存セッションを表示
-	sessions, err := memoryManager.GetCurrentProjectSessions(5)
+	messages, err := handleSessionSelection(memoryManager, currentDir, cfg.Model)
 	if err != nil {
-		fmt.Printf("Error loading sessions: %v\n", err)
-	} else if len(sessions) > 0 {
-		fmt.Printf("Found %d previous sessions for this project:\n", len(sessions))
-		for i, session := range sessions {
-			status := "completed"
-			if session.EndedAt == nil {
-				status = "active"
-			}
-			lastMsg := session.LastMessage
-			if len(lastMsg) > 50 {
-				lastMsg = lastMsg[:50] + "..."
-			}
-			fmt.Printf("%d. %s (%s) - %s\n", i+1, session.ID, status, lastMsg)
-		}
-		fmt.Print("Start new session or restore (new/1-5): ")
-
-		scanner := bufio.NewScanner(os.Stdin)
-		if scanner.Scan() {
-			choice := strings.TrimSpace(scanner.Text())
-
-			if choice != "new" && choice != "" {
-				// セッション番号をパース
-				if sessionIndex, err := strconv.Atoi(choice); err == nil {
-					if sessionIndex >= 1 && sessionIndex <= len(sessions) {
-						selectedSession := sessions[sessionIndex-1]
-
-						// セッションを復元
-						restoredSession, err := memoryManager.RestoreSession(selectedSession.ID)
-						if err != nil {
-							fmt.Printf("Error restoring session: %v\n", err)
-						} else {
-							currentSession = restoredSession
-							fmt.Printf("Restored session: %s\n", restoredSession.ID)
-
-							// 過去の会話履歴を読み込み
-							memoryMessages, err := memoryManager.GetSessionMessages(selectedSession.ID)
-							if err != nil {
-								fmt.Printf("Error loading session messages: %v\n", err)
-							} else {
-								// OpenAI形式に変換
-								messages = convertToOpenAIMessages(memoryMessages)
-								fmt.Printf("Loaded %d previous messages\n", len(messages))
-							}
-						}
-					} else {
-						fmt.Println("Invalid session number. Starting new session.")
-					}
-				} else {
-					fmt.Println("Invalid input. Starting new session.")
-				}
-			}
-		}
-	}
-
-	// 新しいセッションを開始（復元しなかった場合）
-	if currentSession == nil {
-		session, err := memoryManager.StartSession(currentDir, cfg.Model)
-		if err != nil {
-			fmt.Printf("Error starting session: %v\n", err)
-		} else {
-			currentSession = session
-			fmt.Printf("Started new session: %s\n", session.ID)
-		}
+		fmt.Printf("Session initialization failed: %v\n", err)
+		os.Exit(1)
 	}
 
 	// OpenAIクライアントを初期化
@@ -497,21 +537,3 @@ func main() {
 	}
 }
 
-// convertToOpenAIMessages converts memory messages to OpenAI format
-func convertToOpenAIMessages(memoryMessages []*memory.Message) []openai.ChatCompletionMessage {
-	var messages []openai.ChatCompletionMessage
-
-	for _, msg := range memoryMessages {
-		// Skip tool messages for now (they are complex to restore properly)
-		if msg.Role == "tool" {
-			continue
-		}
-
-		messages = append(messages, openai.ChatCompletionMessage{
-			Role:    msg.Role,
-			Content: msg.Content,
-		})
-	}
-
-	return messages
-}
