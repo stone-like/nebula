@@ -594,6 +594,56 @@ Complete the entire task following this protocol in one continuous flow. No shor
 - [Gemini CLI ソースコード](https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/core/prompts.ts)
 :::
 
+### main.goとの統合
+
+`getSystemPrompt`関数を定義しただけでは、実際にLLMに渡されません。`handleConversation`関数内でシステムプロンプトを適切に統合する必要があります。
+
+#### システムプロンプトの統合コード
+
+```go
+// handleConversation関数内でシステムプロンプトを統合
+func handleConversation(client *openai.Client, cfg *config.Config, memoryManager *memory.Manager, toolSchemas []openai.Tool, toolsMap map[string]tools.ToolDefinition, userInput string, messages []openai.ChatCompletionMessage, planMode bool) []openai.ChatCompletionMessage {
+	// システムプロンプトが設定されていない場合は最初に追加
+	// （復元されたメッセージにはシステムプロンプトが含まれていない可能性があるため）
+	hasSystemPrompt := false
+	if len(messages) > 0 && messages[0].Role == openai.ChatMessageRoleSystem {
+		hasSystemPrompt = true
+	}
+
+	if !hasSystemPrompt {
+		// システムプロンプトを先頭に追加
+		systemMessage := openai.ChatCompletionMessage{
+			Role:    openai.ChatMessageRoleSystem,
+			Content: getSystemPrompt(),
+		}
+		messages = append([]openai.ChatCompletionMessage{systemMessage}, messages...)
+	}
+
+	// ユーザーメッセージを履歴に追加
+	messages = append(messages, openai.ChatCompletionMessage{
+		Role:    openai.ChatMessageRoleUser,
+		Content: userInput,
+	})
+	
+	// 以下、API呼び出しの処理が続く...
+}
+```
+
+#### 統合の重要ポイント
+
+1. **セッション復元時の考慮**: 
+   - 復元されたメッセージ履歴にはシステムプロンプトが含まれていない場合がある
+   - `hasSystemPrompt`フラグで確認し、必要に応じて先頭に追加
+
+2. **メッセージ配列の構造**:
+   - OpenAI APIでは、システムメッセージは配列の先頭に配置する必要がある
+   - `append([]openai.ChatCompletionMessage{systemMessage}, messages...)`で既存メッセージの前に挿入
+
+3. **一度だけ追加**:
+   - 同じ会話セッション内で複数回システムプロンプトを追加しないよう制御
+
+この統合により、nebulaは起動時から一貫してシステムプロンプトに従った行動を取るようになり、**情報収集→実装**の自動実行フローが確実に動作します。
+
 ### モデルによるプロンプト準拠の違い
 
 ここまでシステムプロンプトを作成し、GPT-4.1-miniでならプロンプト準拠で動き、複雑なタスクもこなせるようになりました。

@@ -171,11 +171,11 @@ func handleConversation(client *openai.Client, cfg *config.Config, memoryManager
 
 	if !hasSystemPrompt {
 		// システムプロンプトを先頭に追加
-		// systemMessage := openai.ChatCompletionMessage{
-		// 	Role:    openai.ChatMessageRoleSystem,
-		// 	Content: getSystemPrompt(),
-		// }
-		// messages = append([]openai.ChatCompletionMessage{systemMessage}, messages...)
+		systemMessage := openai.ChatCompletionMessage{
+			Role:    openai.ChatMessageRoleSystem,
+			Content: getSystemPrompt(),
+		}
+		messages = append([]openai.ChatCompletionMessage{systemMessage}, messages...)
 	}
 
 	// ユーザーメッセージを履歴に追加
